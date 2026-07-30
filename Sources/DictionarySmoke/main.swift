@@ -101,4 +101,41 @@ do {
     }
 }
 
+// Update versioning
+expect(UpdateVersioning.normalizeTag("v1.5.0") == "1.5.0", "normalize tag")
+expect(UpdateVersioning.compare("1.4.0", "1.5.0") == .ascending, "compare ascending")
+expect(UpdateVersioning.isNewer(latest: "1.5.0", than: "1.4.0"), "is newer")
+expect(githubURL.contains("ahmadghaisanfad2/typester-macos"), "github URL is fork")
+
+do {
+    let json: [String: Any] = [
+        "tag_name": "v1.6.0",
+        "html_url": "https://example.com/r",
+        "assets": [
+            [
+                "name": "Typester-1.6.0.dmg",
+                "browser_download_url": "https://example.com/Typester-1.6.0.dmg"
+            ]
+        ]
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: json)
+    let outcome = UpdateChecker.outcome(
+        data: data,
+        response: HTTPURLResponse(
+            url: URL(string: "https://api.github.com")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ),
+        error: nil,
+        currentVersion: "1.5.0"
+    )
+    if case .updateAvailable(_, let latest, let dmg, _) = outcome {
+        expect(latest == "1.6.0", "update latest")
+        expect(dmg.absoluteString.contains("Typester-1.6.0.dmg"), "update dmg url")
+    } else {
+        expect(false, "update available outcome")
+    }
+}
+
 print("All smoke checks passed.")

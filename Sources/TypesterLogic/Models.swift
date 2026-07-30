@@ -226,7 +226,11 @@ public let supportedLanguages: [SupportedLanguage] = {
 
     return popular + others
 }()
-public let githubURL = "https://github.com/nickustinov/typester-macos"
+public let githubOwner = "ahmadghaisanfad2"
+public let githubRepo = "typester-macos"
+public let githubURL = "https://github.com/\(githubOwner)/\(githubRepo)"
+public let githubReleasesAPIURL = "https://api.github.com/repos/\(githubOwner)/\(githubRepo)/releases/latest"
+public let githubReleasesPageURL = "\(githubURL)/releases"
 
 public struct ShortcutKeys: Codable, Equatable {
     public var modifiers: UInt
