@@ -1,7 +1,7 @@
 import AppKit
 
 /// Utilities for loading app assets from bundle or development paths.
-enum AssetLoader {
+public enum AssetLoader {
     /// Finds the path to an asset file, checking bundle resources first,
     /// then development paths for `swift run`.
     static func findAssetPath(filename: String) -> String? {
@@ -38,7 +38,7 @@ enum AssetLoader {
     }
 
     /// Loads an image from the Assets folder, returning nil if not found.
-    static func loadImage(named filename: String) -> NSImage? {
+    public static func loadImage(named filename: String) -> NSImage? {
         guard let path = findAssetPath(filename: filename) else {
             return nil
         }

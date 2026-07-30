@@ -16,10 +16,12 @@ Features:
 - **Multiple providers** — Choose between Soniox or Deepgram for speech recognition
 - **Press-to-speak** — Hold a key to dictate, release to paste (default mode, configurable: Fn, Left/Right ⌘, Left/Right ⌥)
 - **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or custom shortcut)
-- **Real-time transcription** — Uses streaming APIs for low-latency speech recognition
+- **Real-time transcription** — Uses streaming APIs for low-latency speech recognition (Soniox `stt-rt-v5`)
 - **Multilingual** — Soniox: 60+ languages with hints; Deepgram: auto-detects with multilingual model
 - **Microphone selection** — Choose your preferred input device from the menu
 - **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox)
+- **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed Soniox terms
+- **Domain / topic context** — Optional Soniox context fields in Settings for better domain bias
 - **Auto-paste** — Transcribed text is automatically pasted into the active application
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
 - **Launch at login** — Start automatically when you log in
@@ -57,14 +59,20 @@ Typester requires two macOS permissions:
 2. Speak — your words appear in the active text field
 3. Press the hotkey again to stop
 
-You can switch between modes in Settings. Use the menu bar to select your microphone, preferred languages (Soniox only), or access settings.
+You can switch between modes in Settings. Use the menu bar to select your microphone, preferred languages (Soniox only), teach corrections from the last transcript, or access settings.
 
 ## Building from source
 
-**Debug build:**
+**Debug build (requires Xcode for SwiftUI UI target):**
 ```bash
 swift build
 swift run
+```
+
+**Logic-only build (Command Line Tools):**
+```bash
+swift build --target TypesterCore --build-system native
+swift run dictionary-smoke --build-system native
 ```
 
 **Release build (universal binary + DMG):**
@@ -104,30 +112,44 @@ security delete-generic-password -s "com.typester.api" -a "deepgram-api-key"
 ```
 Sources/
 ├── main.swift                      # App entry point
-└── TypesterCore/
+├── DictionarySmoke/                # CLI smoke checks (no XCTest required)
+├── TypesterLogic/                  # Non-UI core (builds with Command Line Tools)
+│   ├── Models.swift                # Data models + DictionaryHelpers
+│   ├── SettingsStore.swift         # UserDefaults + Keychain persistence
+│   ├── HotkeyManager.swift         # Global hotkey registration (Carbon Events)
+│   ├── PressKeyMonitor.swift       # Press-to-speak key detection (CGEventTap)
+│   ├── AudioRecorder.swift         # AVAudioEngine microphone capture
+│   ├── STTProvider.swift           # Speech-to-text provider protocol
+│   ├── STTClientBase.swift         # Base class for STT WebSocket clients
+│   ├── SonioxClient.swift          # Soniox WebSocket streaming (stt-rt-v5)
+│   ├── DeepgramClient.swift        # Deepgram WebSocket streaming
+│   ├── TextPaster.swift            # Clipboard + simulated Cmd+V paste
+│   ├── KeyboardUtils.swift         # Key code to string conversion
+│   ├── AssetLoader.swift           # Asset path finding and loading
+│   └── Debug.swift                 # Debug logging utility
+└── TypesterCore/                   # SwiftUI UI (needs Xcode / CI macOS image)
     ├── AppDelegate.swift           # Status bar, menu, recording control
-    ├── Models.swift                # Data models (ShortcutKeys, ActivationMode, etc.)
-    ├── SettingsStore.swift         # UserDefaults + Keychain persistence
     ├── SettingsView.swift          # SwiftUI settings interface
     ├── OnboardingView.swift        # First-run setup wizard
-    ├── HotkeyManager.swift         # Global hotkey registration (Carbon Events)
-    ├── PressKeyMonitor.swift        # Press-to-speak key detection (CGEventTap)
-    ├── AudioRecorder.swift         # AVAudioEngine microphone capture
-    ├── STTProvider.swift           # Speech-to-text provider protocol
-    ├── STTClientBase.swift         # Base class for STT WebSocket clients
-    ├── SonioxClient.swift          # Soniox WebSocket streaming
-    ├── DeepgramClient.swift        # Deepgram WebSocket streaming
-    ├── TextPaster.swift            # Clipboard + simulated Cmd+V paste
-    ├── KeyboardUtils.swift         # Key code to string conversion
-    ├── AssetLoader.swift           # Asset path finding and loading
-    └── Debug.swift                 # Debug logging utility
+    ├── TeachDictionaryView.swift   # Teach wrong→right correction UI
+    ├── SubtitleOverlay.swift       # Live subtitle overlay
+    └── Exports.swift               # Re-exports TypesterCore logic
 
 Tests/
 ├── ModelsTests.swift               # Model encoding/decoding tests
 ├── KeyboardUtilsTests.swift        # Keyboard utility tests
+├── DictionaryHelpersTests.swift    # Correction / context helper tests
 └── STTResponseParsingTests.swift   # STT response parsing tests
 ```
 
+**Local build notes (Command Line Tools only):** macOS CLT may lack SwiftUI macro plugins and XCTest. Use:
+
+```bash
+swift build --target TypesterCore --build-system native
+swift run dictionary-smoke --build-system native
+```
+
+Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-14`).
 ## Disclaimer
 
 This project is not affiliated with, endorsed by, or sponsored by Soniox or Deepgram. These are third-party services used for speech recognition.

@@ -2,10 +2,10 @@ import Carbon.HIToolbox
 import AppKit
 
 /// Utilities for converting key codes to displayable strings.
-enum KeyboardUtils {
+public enum KeyboardUtils {
     /// Converts a key code to a human-readable character using the current keyboard layout.
     /// Returns nil for special keys (use `keyCodeToString` for complete display).
-    static func keyCodeToCharacter(_ keyCode: UInt16) -> String? {
+    public static func keyCodeToCharacter(_ keyCode: UInt16) -> String? {
         let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
         guard let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
             return nil
@@ -35,7 +35,7 @@ enum KeyboardUtils {
     }
 
     /// Converts a key code to a display string, handling special keys.
-    static func keyCodeToString(_ keyCode: UInt16) -> String {
+    public static func keyCodeToString(_ keyCode: UInt16) -> String {
         switch Int(keyCode) {
         case kVK_Return: return "↩"
         case kVK_Tab: return "⇥"
@@ -73,7 +73,7 @@ enum KeyboardUtils {
 
     /// Formats a keyboard shortcut with modifiers for display.
     /// Modifiers are displayed in standard order: ⌃⌥⇧⌘
-    static func formatShortcutDisplay(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> String {
+    public static func formatShortcutDisplay(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> String {
         var result = ""
         if modifiers.contains(.control) { result += "⌃" }
         if modifiers.contains(.option) { result += "⌥" }
@@ -84,7 +84,7 @@ enum KeyboardUtils {
     }
 
     /// Formats a triple-tap modifier display string (e.g., "⌘⌘⌘").
-    static func formatTripleTapDisplay(modifier: String) -> String {
+    public static func formatTripleTapDisplay(modifier: String) -> String {
         let symbol: String
         switch modifier {
         case "command": symbol = "⌘"

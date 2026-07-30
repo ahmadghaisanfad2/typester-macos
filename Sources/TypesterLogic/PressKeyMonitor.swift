@@ -1,10 +1,10 @@
 import Cocoa
 
-class PressKeyMonitor {
-    static let shared = PressKeyMonitor()
+public class PressKeyMonitor {
+    public static let shared = PressKeyMonitor()
 
-    var onKeyPressed: (() -> Void)?
-    var onKeyReleased: (() -> Void)?
+    public var onKeyPressed: (() -> Void)?
+    public var onKeyReleased: (() -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -25,7 +25,7 @@ class PressKeyMonitor {
         }
     }
 
-    func start() {
+    public func start() {
         guard eventTap == nil else { return }
 
         var eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
@@ -59,7 +59,7 @@ class PressKeyMonitor {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    func stop() {
+    public func stop() {
         activationTimer?.cancel()
         activationTimer = nil
 

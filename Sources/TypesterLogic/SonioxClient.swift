@@ -1,20 +1,26 @@
 import Foundation
 
 /// Soniox STT connection configuration.
-struct SonioxConnectionConfig: STTConnectionConfig {
-    var apiKey: String? { SettingsStore.shared.apiKey }
+public struct SonioxConnectionConfig: STTConnectionConfig {
+    public init() {}
+    public var apiKey: String? { SettingsStore.shared.apiKey }
 
-    func makeWebSocketRequest() -> URLRequest? {
+    public func makeWebSocketRequest() -> URLRequest? {
         let url = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
         return URLRequest(url: url)
     }
 
-    func parseResponse(_ json: [String: Any]) -> [STTParseResult] {
+    public func parseResponse(_ json: [String: Any]) -> [STTParseResult] {
         var results: [STTParseResult] = []
 
-        // Check for error response (invalid API key, etc.)
+        // Legacy error shape
         if let error = json["error"] as? String {
             return [.error(error)]
+        }
+
+        // Current Soniox API error shape
+        if let errorMessage = json["error_message"] as? String {
+            return [.error(errorMessage)]
         }
 
         if let tokens = json["tokens"] as? [[String: Any]] {
@@ -45,7 +51,8 @@ struct SonioxConnectionConfig: STTConnectionConfig {
 }
 
 /// Soniox speech-to-text client.
-class SonioxClient: STTClientBase {
+public class SonioxClient: STTClientBase {
+    public override init() { super.init() }
     override func makeConnectionConfig() -> STTConnectionConfig {
         SonioxConnectionConfig()
     }
@@ -63,7 +70,7 @@ class SonioxClient: STTClientBase {
 
         var config: [String: Any] = [
             "api_key": apiKey,
-            "model": "stt-rt-preview",
+            "model": "stt-rt-v5",
             "audio_format": "pcm_s16le",
             "sample_rate": 16000,
             "num_channels": 1,
@@ -75,9 +82,8 @@ class SonioxClient: STTClientBase {
             config["language_hints"] = languageHints
         }
 
-        let dictionaryTerms = SettingsStore.shared.dictionaryTerms
-        if !dictionaryTerms.isEmpty {
-            config["context"] = ["terms": dictionaryTerms]
+        if let context = SettingsStore.shared.sonioxContext() {
+            config["context"] = context
         }
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),

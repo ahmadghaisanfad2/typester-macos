@@ -91,6 +91,25 @@ final class STTResponseParsingTests: XCTestCase {
         }
     }
 
+    func testSonioxErrorMessageField() {
+        let config = SonioxConnectionConfig()
+        let json: [String: Any] = [
+            "tokens": [],
+            "error_code": 401,
+            "error_type": "unauthenticated",
+            "error_message": "Incorrect API key provided."
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .error(let message) = results[0] {
+            XCTAssertEqual(message, "Incorrect API key provided.")
+        } else {
+            XCTFail("Expected error result from error_message")
+        }
+    }
+
     func testSonioxFinished() {
         let config = SonioxConnectionConfig()
         let json: [String: Any] = [

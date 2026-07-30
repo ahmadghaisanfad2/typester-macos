@@ -2,14 +2,14 @@ import Cocoa
 import ServiceManagement
 import Security
 
-extension Notification.Name {
+public extension Notification.Name {
     static let settingsChanged = Notification.Name("settingsChanged")
 }
 
-class SettingsStore: ObservableObject {
-    static let shared = SettingsStore()
+public class SettingsStore: ObservableObject {
+    public static let shared = SettingsStore()
 
-    @Published var launchAtLogin: Bool = false {
+    @Published public var launchAtLogin: Bool = false {
         didSet {
             if launchAtLogin {
                 try? SMAppService.mainApp.register()
@@ -19,46 +19,64 @@ class SettingsStore: ObservableObject {
         }
     }
 
-    @Published var shortcutKeys: ShortcutKeys = .defaultTripleCmd {
+    @Published public var shortcutKeys: ShortcutKeys = .defaultTripleCmd {
         didSet {
             saveShortcutKeys()
             NotificationCenter.default.post(name: .settingsChanged, object: nil)
         }
     }
 
-    @Published var activationMode: ActivationMode = .pressToSpeak {
+    @Published public var activationMode: ActivationMode = .pressToSpeak {
         didSet {
             saveActivationMode()
             NotificationCenter.default.post(name: .settingsChanged, object: nil)
         }
     }
 
-    @Published var pressToSpeakKey: PressToSpeakKey = .fn {
+    @Published public var pressToSpeakKey: PressToSpeakKey = .fn {
         didSet {
             savePressToSpeakKey()
             NotificationCenter.default.post(name: .settingsChanged, object: nil)
         }
     }
 
-    @Published var languageHints: [String] = [] {
+    @Published public var languageHints: [String] = [] {
         didSet {
             saveLanguageHints()
         }
     }
 
-    @Published var selectedMicrophoneID: String? = nil {
+    @Published public var selectedMicrophoneID: String? = nil {
         didSet {
             saveSelectedMicrophone()
         }
     }
 
-    @Published var dictionaryTerms: [String] = [] {
+    @Published public var dictionaryTerms: [String] = [] {
         didSet {
             saveDictionaryTerms()
         }
     }
 
-    @Published var sttProvider: STTProviderType = .soniox {
+    @Published public var correctionPairs: [CorrectionPair] = [] {
+        didSet {
+            saveCorrectionPairs()
+        }
+    }
+
+    @Published public var contextDomain: String = "" {
+        didSet {
+            saveContextDomain()
+        }
+    }
+
+    @Published public var contextTopic: String = "" {
+        didSet {
+            saveContextTopic()
+        }
+    }
+
+    @Published public var sttProvider: STTProviderType = .soniox {
         didSet {
             saveSTTProvider()
             NotificationCenter.default.post(name: .settingsChanged, object: nil)
@@ -72,6 +90,9 @@ class SettingsStore: ObservableObject {
     private let languageHintsKey = "languageHints"
     private let selectedMicrophoneKey = "selectedMicrophone"
     private let dictionaryTermsKey = "dictionaryTerms"
+    private let correctionPairsKey = "correctionPairs"
+    private let contextDomainKey = "contextDomain"
+    private let contextTopicKey = "contextTopic"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
@@ -83,11 +104,62 @@ class SettingsStore: ObservableObject {
         loadLanguageHints()
         loadSelectedMicrophone()
         loadDictionaryTerms()
+        loadCorrectionPairs()
+        loadContextDomain()
+        loadContextTopic()
         loadSTTProvider()
         syncLaunchAtLoginStatus()
     }
 
-    func syncLaunchAtLoginStatus() {
+    // MARK: - Dictionary / Soniox context
+
+    @discardableResult
+    public func addCorrection(wrong: String, right: String) -> Bool {
+        guard let updated = DictionaryHelpers.upsertCorrection(
+            wrong: wrong,
+            right: right,
+            into: correctionPairs
+        ) else {
+            return false
+        }
+        correctionPairs = updated
+        return true
+    }
+
+    public func removeCorrection(id: UUID) {
+        correctionPairs.removeAll { $0.id == id }
+    }
+
+    public func applyReplacements(_ text: String) -> String {
+        DictionaryHelpers.applyReplacements(text, pairs: correctionPairs)
+    }
+
+    public var sonioxTerms: [String] {
+        DictionaryHelpers.mergeTerms(manual: dictionaryTerms, pairs: correctionPairs)
+    }
+
+    public var sonioxGeneral: [[String: String]] {
+        var general: [[String: String]] = []
+        let domain = contextDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let topic = contextTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !domain.isEmpty {
+            general.append(["key": "domain", "value": domain])
+        }
+        if !topic.isEmpty {
+            general.append(["key": "topic", "value": topic])
+        }
+        return general
+    }
+
+    public func sonioxContext() -> [String: Any]? {
+        DictionaryHelpers.buildSonioxContext(
+            domain: contextDomain,
+            topic: contextTopic,
+            terms: sonioxTerms
+        )
+    }
+
+    public func syncLaunchAtLoginStatus() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
@@ -158,6 +230,35 @@ class SettingsStore: ObservableObject {
         UserDefaults.standard.set(dictionaryTerms, forKey: dictionaryTermsKey)
     }
 
+    private func loadCorrectionPairs() {
+        guard let data = UserDefaults.standard.data(forKey: correctionPairsKey),
+              let pairs = try? JSONDecoder().decode([CorrectionPair].self, from: data) else {
+            return
+        }
+        correctionPairs = pairs
+    }
+
+    private func saveCorrectionPairs() {
+        guard let data = try? JSONEncoder().encode(correctionPairs) else { return }
+        UserDefaults.standard.set(data, forKey: correctionPairsKey)
+    }
+
+    private func loadContextDomain() {
+        contextDomain = UserDefaults.standard.string(forKey: contextDomainKey) ?? ""
+    }
+
+    private func saveContextDomain() {
+        UserDefaults.standard.set(contextDomain, forKey: contextDomainKey)
+    }
+
+    private func loadContextTopic() {
+        contextTopic = UserDefaults.standard.string(forKey: contextTopicKey) ?? ""
+    }
+
+    private func saveContextTopic() {
+        UserDefaults.standard.set(contextTopic, forKey: contextTopicKey)
+    }
+
     private func loadSTTProvider() {
         guard let rawValue = UserDefaults.standard.string(forKey: sttProviderKey),
               let provider = STTProviderType(rawValue: rawValue) else {
@@ -173,7 +274,7 @@ class SettingsStore: ObservableObject {
     // MARK: - API keys (Keychain)
 
     // Soniox API key
-    var apiKey: String? {
+    public var apiKey: String? {
         get { getKeychainItem(account: sonioxKeychainAccount) }
         set {
             if let value = newValue {
@@ -186,7 +287,7 @@ class SettingsStore: ObservableObject {
     }
 
     // Deepgram API key
-    var deepgramApiKey: String? {
+    public var deepgramApiKey: String? {
         get { getKeychainItem(account: deepgramKeychainAccount) }
         set {
             if let value = newValue {

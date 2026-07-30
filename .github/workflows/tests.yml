@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Build logic + smoke checks
+        run: |
+          swift build --product dictionary-smoke
+          .build/debug/dictionary-smoke
+
       - name: Build
         run: swift build
 
