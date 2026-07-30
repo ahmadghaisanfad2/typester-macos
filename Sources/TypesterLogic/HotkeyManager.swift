@@ -1,8 +1,8 @@
 import Cocoa
 import Carbon.HIToolbox
 
-class HotkeyManager {
-    static let shared = HotkeyManager()
+public class HotkeyManager {
+    public static let shared = HotkeyManager()
 
     private var hotkeyRef: EventHotKeyRef?
 
@@ -13,7 +13,7 @@ class HotkeyManager {
     private var globalEventMonitor: Any?
     private var previousModifierFlags: NSEvent.ModifierFlags = []
 
-    var onHotkeyTriggered: (() -> Void)?
+    public var onHotkeyTriggered: (() -> Void)?
 
     private init() {
         installCarbonHandler()
@@ -57,7 +57,7 @@ class HotkeyManager {
         }
     }
 
-    func registerHotkey() {
+    public func registerHotkey() {
         unregisterHotkey()
 
         let keys = SettingsStore.shared.shortcutKeys

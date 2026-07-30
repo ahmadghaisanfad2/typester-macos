@@ -1,7 +1,7 @@
 import Foundation
 
 /// Result of parsing an STT response message.
-enum STTParseResult {
+public enum STTParseResult {
     case transcript(text: String, isFinal: Bool)
     case endpoint
     case finalized
@@ -11,7 +11,7 @@ enum STTParseResult {
 }
 
 /// Protocol for STT client configuration - each provider implements this.
-protocol STTConnectionConfig {
+public protocol STTConnectionConfig {
     var apiKey: String? { get }
     func makeWebSocketRequest() -> URLRequest?
     func parseResponse(_ json: [String: Any]) -> [STTParseResult]
@@ -19,7 +19,8 @@ protocol STTConnectionConfig {
 
 /// Base class for speech-to-text WebSocket clients.
 /// Handles connection lifecycle, audio buffering, and message routing.
-class STTClientBase: NSObject, STTProvider {
+public class STTClientBase: NSObject, STTProvider {
+    public override init() { super.init() }
     static let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
@@ -36,16 +37,16 @@ class STTClientBase: NSObject, STTProvider {
     private var isIntentionalDisconnect = false
     private var connectionReady = false
 
-    var isConnected: Bool { connectionReady }
+    public var isConnected: Bool { connectionReady }
 
     // MARK: - Callbacks (STTProvider protocol)
 
-    var onTranscript: ((String, Bool) -> Void)?
-    var onEndpoint: (() -> Void)?
-    var onFinalized: (() -> Void)?
-    var onError: ((String) -> Void)?
-    var onConnected: (() -> Void)?
-    var onDisconnected: (() -> Void)?
+    public var onTranscript: ((String, Bool) -> Void)?
+    public var onEndpoint: (() -> Void)?
+    public var onFinalized: (() -> Void)?
+    public var onError: ((String) -> Void)?
+    public var onConnected: (() -> Void)?
+    public var onDisconnected: (() -> Void)?
 
     // MARK: - Abstract hooks (subclasses override)
 
@@ -72,7 +73,7 @@ class STTClientBase: NSObject, STTProvider {
 
     // MARK: - Connection (STTProvider protocol)
 
-    func connect() {
+    public func connect() {
         Debug.log("connect() called, isConnecting=\(isConnecting)")
         guard !isConnecting else {
             Debug.log("connect() SKIPPED - already connecting")
@@ -107,7 +108,7 @@ class STTClientBase: NSObject, STTProvider {
         receiveMessage()
     }
 
-    func disconnect() {
+    public func disconnect() {
         Debug.log("disconnect() called, buffered chunks: \(audioBuffer.count)")
         isIntentionalDisconnect = true
         isConnecting = false
@@ -119,7 +120,7 @@ class STTClientBase: NSObject, STTProvider {
 
     // MARK: - Audio streaming (STTProvider protocol)
 
-    func sendAudio(_ data: Data) {
+    public func sendAudio(_ data: Data) {
         if connectionReady {
             webSocketTask?.send(.data(data)) { _ in }
         } else {
@@ -127,7 +128,7 @@ class STTClientBase: NSObject, STTProvider {
         }
     }
 
-    func sendFinalize() {
+    public func sendFinalize() {
         Debug.log("sendFinalize() called, isConnected=\(isConnected), buffered=\(audioBuffer.count)")
         if connectionReady {
             sendFinalizeMessage()

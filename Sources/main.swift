@@ -1,5 +1,5 @@
 import Cocoa
-import TypesterCore
+import TypesterUI
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

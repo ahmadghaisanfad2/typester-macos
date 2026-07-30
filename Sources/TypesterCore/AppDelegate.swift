@@ -3,15 +3,18 @@ import SwiftUI
 import Carbon.HIToolbox
 import AVFoundation
 import CoreAudio
+import TypesterCore
 
 public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
+    private var teachWindow: NSWindow?
 
     private let audioRecorder = AudioRecorder()
     private let textPaster = TextPaster()
     private var sttProvider: STTProvider!
+    private var lastTranscript = ""
 
     private func createSTTProvider() -> STTProvider {
         switch SettingsStore.shared.sttProvider {
@@ -108,21 +111,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onEndpoint = { [weak self] in
             guard let self = self else { return }
-            let text = self.accumulatedText.trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty {
-                self.textPaster.paste(text + " ")
-                self.accumulatedText = ""
-            }
+            self.pasteAccumulatedTranscript()
             self.subtitleOverlay.clearText()
         }
 
         sttProvider.onFinalized = { [weak self] in
             guard let self = self else { return }
-            let text = self.accumulatedText.trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty {
-                self.textPaster.paste(text + " ")
-                self.accumulatedText = ""
-            }
+            self.pasteAccumulatedTranscript()
             self.subtitleOverlay.hide()
             self.sttProvider.disconnect()
         }
@@ -286,6 +281,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(.separator())
 
+        let teachItem = NSMenuItem(
+            title: "Teach last transcript…",
+            action: #selector(openTeachDictionary),
+            keyEquivalent: ""
+        )
+        teachItem.isEnabled = !lastTranscript.isEmpty
+        menu.addItem(teachItem)
+
         menu.addItem(NSMenuItem(
             title: "Settings...",
             action: #selector(openSettings),
@@ -301,6 +304,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ))
 
         statusItem.menu = menu
+    }
+
+    private func pasteAccumulatedTranscript() {
+        let text = accumulatedText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        lastTranscript = text
+        let replaced = SettingsStore.shared.applyReplacements(text)
+        textPaster.paste(replaced + " ")
+        accumulatedText = ""
+        rebuildMenu()
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
@@ -586,6 +599,39 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             settingsWindow = window
         }
 
+        presentUtilityWindow(settingsWindow)
+    }
+
+    @objc private func openTeachDictionary() {
+        guard !lastTranscript.isEmpty else { return }
+
+        let transcript = lastTranscript
+        let teachView = TeachDictionaryView(
+            transcript: transcript,
+            onSaved: { [weak self] in
+                self?.teachWindow?.close()
+                self?.teachWindow = nil
+            },
+            onCancel: { [weak self] in
+                self?.teachWindow?.close()
+                self?.teachWindow = nil
+            }
+        )
+
+        let hostingController = NSHostingController(rootView: teachView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Teach Dictionary"
+        window.styleMask = [.titled, .closable]
+        window.center()
+        window.delegate = self
+        teachWindow = window
+
+        presentUtilityWindow(window)
+    }
+
+    private func presentUtilityWindow(_ window: NSWindow?) {
+        guard let window else { return }
+
         setupMainMenu()
 
         // Menu bar apps need .regular policy for text input to work
@@ -593,12 +639,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSApp.setActivationPolicy(.regular)
         }
 
-        settingsWindow?.level = .floating
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.settingsWindow?.level = .normal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            window.level = .normal
         }
     }
 
@@ -629,8 +675,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
-        // Reset to accessory policy when settings/onboarding closes (menu bar app behavior)
-        if NSApp.activationPolicy() == .regular {
+        if let window = notification.object as? NSWindow, window === teachWindow {
+            teachWindow = nil
+        }
+
+        // Reset to accessory policy when settings/onboarding/teach closes (menu bar app behavior)
+        let remainingWindows = [settingsWindow, onboardingWindow, teachWindow].compactMap { $0 }
+        let stillOpen = remainingWindows.contains { $0.isVisible }
+        if !stillOpen, NSApp.activationPolicy() == .regular {
             NSApp.setActivationPolicy(.accessory)
         }
     }

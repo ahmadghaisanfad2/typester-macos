@@ -2,14 +2,15 @@ import AVFoundation
 import Cocoa
 import CoreAudio
 
-class AudioRecorder {
+public class AudioRecorder {
+    public init() {}
     private var audioEngine: AVAudioEngine?
     private var isRecording = false
 
     // MARK: - Callbacks
 
-    var onAudioBuffer: ((Data) -> Void)?
-    var onError: ((String) -> Void)?
+    public var onAudioBuffer: ((Data) -> Void)?
+    public var onError: ((String) -> Void)?
 
     // MARK: - Permission
 
@@ -32,7 +33,7 @@ class AudioRecorder {
 
     // MARK: - Recording
 
-    func startRecording() {
+    public func startRecording() {
         Debug.log("startRecording() called, isRecording=\(isRecording)")
         guard !isRecording else {
             Debug.log("startRecording() SKIPPED - already recording")
@@ -49,7 +50,7 @@ class AudioRecorder {
         }
     }
 
-    func stopRecording() {
+    public func stopRecording() {
         Debug.log("stopRecording() called, isRecording=\(isRecording)")
         guard isRecording else {
             Debug.log("stopRecording() SKIPPED - not recording")

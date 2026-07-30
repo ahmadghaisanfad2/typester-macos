@@ -1,10 +1,11 @@
 import Foundation
 
 /// Deepgram STT connection configuration.
-struct DeepgramConnectionConfig: STTConnectionConfig {
-    var apiKey: String? { SettingsStore.shared.deepgramApiKey }
+public struct DeepgramConnectionConfig: STTConnectionConfig {
+    public init() {}
+    public var apiKey: String? { SettingsStore.shared.deepgramApiKey }
 
-    func makeWebSocketRequest() -> URLRequest? {
+    public func makeWebSocketRequest() -> URLRequest? {
         guard let apiKey = apiKey else { return nil }
 
         var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
@@ -24,7 +25,7 @@ struct DeepgramConnectionConfig: STTConnectionConfig {
         return request
     }
 
-    func parseResponse(_ json: [String: Any]) -> [STTParseResult] {
+    public func parseResponse(_ json: [String: Any]) -> [STTParseResult] {
         // Check for error response
         if let error = json["error"] as? String {
             return [.error(error)]
@@ -64,7 +65,8 @@ struct DeepgramConnectionConfig: STTConnectionConfig {
 }
 
 /// Deepgram speech-to-text client.
-class DeepgramClient: STTClientBase {
+public class DeepgramClient: STTClientBase {
+    public override init() { super.init() }
     override func makeConnectionConfig() -> STTConnectionConfig {
         DeepgramConnectionConfig()
     }

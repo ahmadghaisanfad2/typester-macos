@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import TypesterCore
 
 class SubtitleViewModel: ObservableObject {
     @Published var finalText: String = ""

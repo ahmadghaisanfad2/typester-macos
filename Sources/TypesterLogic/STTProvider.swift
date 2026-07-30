@@ -1,10 +1,10 @@
 import Foundation
 
-enum STTProviderType: String, Codable, CaseIterable {
+public enum STTProviderType: String, Codable, CaseIterable {
     case soniox = "soniox"
     case deepgram = "deepgram"
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .soniox: return "Soniox"
         case .deepgram: return "Deepgram"
@@ -12,7 +12,7 @@ enum STTProviderType: String, Codable, CaseIterable {
     }
 }
 
-protocol STTProvider: AnyObject {
+public protocol STTProvider: AnyObject {
     var onTranscript: ((String, Bool) -> Void)? { get set }
     var onEndpoint: (() -> Void)? { get set }
     var onFinalized: (() -> Void)? { get set }

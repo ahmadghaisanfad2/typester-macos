@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import Carbon.HIToolbox
 import AppKit
+import TypesterCore
 
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
@@ -93,6 +94,16 @@ struct SettingsView: View {
 
                 if settings.sttProvider == .soniox {
                     Section {
+                        TextField("Domain", text: $settings.contextDomain, prompt: Text("e.g. Healthcare, Software"))
+                        TextField("Topic", text: $settings.contextTopic, prompt: Text("e.g. Product standup"))
+                    } header: {
+                        Text("Context")
+                    } footer: {
+                        Text("Optional domain and topic help Soniox bias recognition toward your subject matter.")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section {
                         ForEach(settings.dictionaryTerms, id: \.self) { term in
                             HStack {
                                 Text(term)
@@ -125,6 +136,33 @@ struct SettingsView: View {
                     } footer: {
                         Text("Add domain-specific words, names, or technical terms to improve recognition accuracy.")
                             .foregroundStyle(.secondary)
+                    }
+
+                    if !settings.correctionPairs.isEmpty {
+                        Section {
+                            ForEach(settings.correctionPairs) { pair in
+                                HStack {
+                                    Text("\(pair.wrong) → \(pair.right)")
+                                        .lineLimit(1)
+
+                                    Spacer()
+
+                                    Button {
+                                        settings.removeCorrection(id: pair.id)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        } header: {
+                            Text("Corrections")
+                        } footer: {
+                            Text("Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox.")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
