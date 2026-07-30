@@ -100,9 +100,15 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Feedback") {
+                Section {
                     Toggle("Show stream preview", isOn: $settings.showStreamPreview)
                     Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
+                    Toggle("Paste on pause", isOn: $settings.pasteOnPause)
+                } header: {
+                    Text("Feedback")
+                } footer: {
+                    Text("Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected.")
+                        .foregroundStyle(.secondary)
                 }
 
                 if settings.sttProvider == .soniox {

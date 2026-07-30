@@ -9,6 +9,8 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
         guard let apiKey = apiKey else { return nil }
 
         var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
+        // Disable silence endpointing unless paste-on-pause is enabled (was 100ms — very choppy).
+        let endpointing = SettingsStore.shared.pasteOnPause ? "500" : "false"
         urlComponents.queryItems = [
             URLQueryItem(name: "model", value: STTProviderType.deepgram.modelID),
             URLQueryItem(name: "language", value: "multi"),
@@ -17,7 +19,7 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "punctuate", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "endpointing", value: "100")
+            URLQueryItem(name: "endpointing", value: endpointing)
         ]
 
         var request = URLRequest(url: urlComponents.url!)

@@ -23,8 +23,10 @@ public class STTClientBase: NSObject, STTProvider {
     public override init() { super.init() }
     static let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 10
-        config.timeoutIntervalForResource = 30
+        // Keep request handshake snappy, but do not bound the lifetime of a
+        // long-lived streaming WebSocket (0 = no resource timeout).
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 0
         return URLSession(configuration: config)
     }()
 
@@ -36,6 +38,8 @@ public class STTClientBase: NSObject, STTProvider {
 
     private var isIntentionalDisconnect = false
     private var connectionReady = false
+    /// Providers like Soniox re-send all final tokens each message; track what we already emitted.
+    private var lastEmittedFinalText = ""
 
     public var isConnected: Bool { connectionReady }
 
@@ -98,6 +102,7 @@ public class STTClientBase: NSObject, STTProvider {
         connectionReady = false
         isIntentionalDisconnect = false
         pendingFinalize = false
+        lastEmittedFinalText = ""
 
         Debug.log("Opening WebSocket connection...")
         connectStartTime = Date()
@@ -112,6 +117,8 @@ public class STTClientBase: NSObject, STTProvider {
         Debug.log("disconnect() called, buffered chunks: \(audioBuffer.count)")
         isIntentionalDisconnect = true
         isConnecting = false
+        pendingFinalize = false
+        lastEmittedFinalText = ""
         audioBuffer.removeAll()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
@@ -137,8 +144,12 @@ public class STTClientBase: NSObject, STTProvider {
             disconnect()
             onFinalized?()
         } else {
-            Debug.log("Waiting for connection to send \(audioBuffer.count) buffered chunks")
-            pendingFinalize = true
+            // Connection dropped mid-stream with leftover buffer — don't wait forever.
+            Debug.log("Not connected with \(audioBuffer.count) buffered chunks; finalizing locally")
+            audioBuffer.removeAll()
+            pendingFinalize = false
+            onFinalized?()
+            disconnect()
         }
     }
 
@@ -200,6 +211,8 @@ public class STTClientBase: NSObject, STTProvider {
                     if !self.isIntentionalDisconnect {
                         Debug.log("WebSocket receive FAILED: \(error.localizedDescription)")
                     }
+                    self.connectionReady = false
+                    self.isConnecting = false
                     self.onDisconnected?()
                 }
             }
@@ -246,8 +259,18 @@ public class STTClientBase: NSObject, STTProvider {
         }
 
         // Emit batched transcripts before other events (endpoint, finalized, etc.)
+        // Soniox re-sends all final tokens each message — only forward the delta.
         if !finalBatch.isEmpty {
-            onTranscript?(finalBatch, true)
+            let delta: String
+            if finalBatch.hasPrefix(lastEmittedFinalText) {
+                delta = String(finalBatch.dropFirst(lastEmittedFinalText.count))
+            } else {
+                delta = finalBatch
+            }
+            lastEmittedFinalText = finalBatch
+            if !delta.isEmpty {
+                onTranscript?(delta, true)
+            }
         }
         if !interimBatch.isEmpty {
             onTranscript?(interimBatch, false)

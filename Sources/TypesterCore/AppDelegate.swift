@@ -92,6 +92,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sttProvider.onDisconnected = { [weak self] in
             guard let self = self else { return }
             self.subtitleOverlay.hide()
+            self.audioRecorder.stopRecording()
             guard self.isRecording else { return }
             self.isRecording = false
             self.statusItem.button?.image = self.normalIcon
@@ -111,6 +112,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onEndpoint = { [weak self] in
             guard let self = self else { return }
+            // Default: keep accumulating through pauses; paste only on finalize (user stops).
+            // Optional paste-on-pause pastes each endpoint utterance immediately.
+            guard SettingsStore.shared.pasteOnPause else { return }
             self.pasteAccumulatedTranscript()
             self.subtitleOverlay.clearText()
         }

@@ -68,14 +68,23 @@ public class SonioxClient: STTClientBase {
     private func sendConfiguration() {
         guard let apiKey = SettingsStore.shared.apiKey else { return }
 
+        // Endpoint detection finalizes (and punctuates) on short pauses. For dictation we
+        // keep it off by default so the stream stays continuous until the user stops;
+        // paste-on-pause mode turns it back on for utterance-by-utterance pasting.
+        let pasteOnPause = SettingsStore.shared.pasteOnPause
         var config: [String: Any] = [
             "api_key": apiKey,
             "model": STTProviderType.soniox.modelID,
             "audio_format": "pcm_s16le",
             "sample_rate": 16000,
             "num_channels": 1,
-            "enable_endpoint_detection": true
+            "enable_endpoint_detection": pasteOnPause
         ]
+        if pasteOnPause {
+            // Prefer fewer false endpoints so brief breaths don't split sentences.
+            config["endpoint_sensitivity"] = -0.3
+            config["max_endpoint_delay_ms"] = 2500
+        }
 
         let languageHints = SettingsStore.shared.languageHints
         if !languageHints.isEmpty {

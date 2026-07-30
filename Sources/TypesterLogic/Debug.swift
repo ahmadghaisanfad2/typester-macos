@@ -13,3 +13,4 @@ public enum Debug {
         print("[\(timestamp)] [\(filename)] \(message)")
     }
 }
+

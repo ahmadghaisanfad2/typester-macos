@@ -95,6 +95,14 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// When true, paste each time the STT provider detects a pause (endpoint).
+    /// When false (default), keep streaming in the overlay and paste only when you stop.
+    @Published public var pasteOnPause: Bool = false {
+        didSet {
+            UserDefaults.standard.set(pasteOnPause, forKey: pasteOnPauseKey)
+        }
+    }
+
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let activationModeKey = "activationMode"
@@ -108,6 +116,7 @@ public class SettingsStore: ObservableObject {
     private let showStreamPreviewKey = "showStreamPreview"
     private let legacyShowStreamAnimationKey = "showStreamAnimation"
     private let playDictationSoundsKey = "playDictationSounds"
+    private let pasteOnPauseKey = "pasteOnPause"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
@@ -296,6 +305,9 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: playDictationSoundsKey) != nil {
             playDictationSounds = UserDefaults.standard.bool(forKey: playDictationSoundsKey)
+        }
+        if UserDefaults.standard.object(forKey: pasteOnPauseKey) != nil {
+            pasteOnPause = UserDefaults.standard.bool(forKey: pasteOnPauseKey)
         }
     }
 

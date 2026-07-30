@@ -18,7 +18,8 @@ public class AudioRecorder {
     // MARK: - Permission
 
     func requestPermission(completion: @escaping (Bool) -> Void) {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
         case .authorized:
             completion(true)
         case .notDetermined:

@@ -1,6 +1,6 @@
 import Cocoa
 
-public let appVersion = "1.6.0"
+public let appVersion = "1.6.1"
 
 public struct CorrectionPair: Codable, Equatable, Identifiable {
     public var id: UUID
