@@ -83,6 +83,18 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var showStreamPreview: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showStreamPreview, forKey: showStreamPreviewKey)
+        }
+    }
+
+    @Published public var playDictationSounds: Bool = false {
+        didSet {
+            UserDefaults.standard.set(playDictationSounds, forKey: playDictationSoundsKey)
+        }
+    }
+
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let activationModeKey = "activationMode"
@@ -93,6 +105,9 @@ public class SettingsStore: ObservableObject {
     private let correctionPairsKey = "correctionPairs"
     private let contextDomainKey = "contextDomain"
     private let contextTopicKey = "contextTopic"
+    private let showStreamPreviewKey = "showStreamPreview"
+    private let legacyShowStreamAnimationKey = "showStreamAnimation"
+    private let playDictationSoundsKey = "playDictationSounds"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
@@ -108,6 +123,7 @@ public class SettingsStore: ObservableObject {
         loadContextDomain()
         loadContextTopic()
         loadSTTProvider()
+        loadFeedbackPreferences()
         syncLaunchAtLoginStatus()
     }
 
@@ -269,6 +285,18 @@ public class SettingsStore: ObservableObject {
 
     private func saveSTTProvider() {
         UserDefaults.standard.set(sttProvider.rawValue, forKey: sttProviderKey)
+    }
+
+    private func loadFeedbackPreferences() {
+        if UserDefaults.standard.object(forKey: showStreamPreviewKey) != nil {
+            showStreamPreview = UserDefaults.standard.bool(forKey: showStreamPreviewKey)
+        } else if UserDefaults.standard.object(forKey: legacyShowStreamAnimationKey) != nil {
+            // Migrate previous toggle key.
+            showStreamPreview = UserDefaults.standard.bool(forKey: legacyShowStreamAnimationKey)
+        }
+        if UserDefaults.standard.object(forKey: playDictationSoundsKey) != nil {
+            playDictationSounds = UserDefaults.standard.bool(forKey: playDictationSoundsKey)
+        }
     }
 
     // MARK: - API keys (Keychain)

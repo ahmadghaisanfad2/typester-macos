@@ -10,7 +10,7 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
 
         var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
         urlComponents.queryItems = [
-            URLQueryItem(name: "model", value: "nova-3"),
+            URLQueryItem(name: "model", value: STTProviderType.deepgram.modelID),
             URLQueryItem(name: "language", value: "multi"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: "16000"),

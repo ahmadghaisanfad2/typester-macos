@@ -22,6 +22,7 @@ Features:
 - **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox)
 - **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed Soniox terms
 - **Domain / topic context** — Optional Soniox context fields in Settings for better domain bias
+- **Check for Updates** — Compare against your fork’s GitHub Releases and download the latest DMG
 - **Auto-paste** — Transcribed text is automatically pasted into the active application
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
 - **Launch at login** — Start automatically when you log in
@@ -82,9 +83,17 @@ swift run dictionary-smoke --build-system native
 
 This creates a universal binary (arm64 + x86_64), signs it if you have a Developer ID certificate, and packages it into a DMG at `dist/Typester-x.x.x.dmg`.
 
+**Publish a GitHub Release locally (no Actions minutes):**
+```bash
+./scripts/publish-release.sh
+```
+
+This builds the DMG, then creates (or updates) a `vX.Y.Z` release on your fork with the DMG attached. In Settings, **Check for Updates** compares the running app to that release and can download the DMG.
+
 Requirements for building:
 - Swift 5.9 or later
-- Xcode Command Line Tools
+- Xcode Command Line Tools (full Xcode needed for the SwiftUI UI target)
+- `gh` CLI authenticated to your fork (for publish)
 
 ## Development
 
@@ -124,6 +133,7 @@ Sources/
 │   ├── SonioxClient.swift          # Soniox WebSocket streaming (stt-rt-v5)
 │   ├── DeepgramClient.swift        # Deepgram WebSocket streaming
 │   ├── TextPaster.swift            # Clipboard + simulated Cmd+V paste
+│   ├── UpdateChecker.swift         # GitHub Releases update check + DMG download
 │   ├── KeyboardUtils.swift         # Key code to string conversion
 │   ├── AssetLoader.swift           # Asset path finding and loading
 │   └── Debug.swift                 # Debug logging utility
@@ -139,6 +149,7 @@ Tests/
 ├── ModelsTests.swift               # Model encoding/decoding tests
 ├── KeyboardUtilsTests.swift        # Keyboard utility tests
 ├── DictionaryHelpersTests.swift    # Correction / context helper tests
+├── UpdateCheckerTests.swift        # Version compare + release parsing tests
 └── STTResponseParsingTests.swift   # STT response parsing tests
 ```
 
@@ -146,7 +157,8 @@ Tests/
 
 ```bash
 swift build --target TypesterCore --build-system native
-swift run dictionary-smoke --build-system native
+swift build --build-system native --product dictionary-smoke
+.build/debug/dictionary-smoke
 ```
 
 Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-14`).

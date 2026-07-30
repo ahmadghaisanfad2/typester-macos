@@ -6,10 +6,13 @@ public class AudioRecorder {
     public init() {}
     private var audioEngine: AVAudioEngine?
     private var isRecording = false
+    private var lastLevelEmit: CFAbsoluteTime = 0
 
     // MARK: - Callbacks
 
     public var onAudioBuffer: ((Data) -> Void)?
+    /// Normalized mic level in 0...1, called on the main queue (~30 Hz).
+    public var onAudioLevel: ((Float) -> Void)?
     public var onError: ((String) -> Void)?
 
     // MARK: - Permission
@@ -62,6 +65,10 @@ public class AudioRecorder {
         audioEngine?.stop()
         audioEngine = nil
         isRecording = false
+        lastLevelEmit = 0
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioLevel?(0)
+        }
         Debug.log("Audio engine stopped")
     }
 
@@ -117,6 +124,8 @@ public class AudioRecorder {
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
+            self.emitAudioLevel(from: buffer)
+
             guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputBufferSize) else {
                 return
             }
@@ -147,5 +156,43 @@ public class AudioRecorder {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
             onError?("Failed to start audio engine: \(error.localizedDescription)")
         }
+    }
+
+    private func emitAudioLevel(from buffer: AVAudioPCMBuffer) {
+        guard onAudioLevel != nil else { return }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastLevelEmit >= 1.0 / 30.0 else { return }
+        lastLevelEmit = now
+
+        let level = Self.normalizedRMS(from: buffer)
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioLevel?(level)
+        }
+    }
+
+    /// RMS of the buffer, boosted for speech and clamped to 0...1.
+    private static func normalizedRMS(from buffer: AVAudioPCMBuffer) -> Float {
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return 0 }
+
+        var sum: Float = 0
+        if let floatData = buffer.floatChannelData?[0] {
+            for i in 0..<frameLength {
+                let s = floatData[i]
+                sum += s * s
+            }
+        } else if let int16Data = buffer.int16ChannelData?[0] {
+            for i in 0..<frameLength {
+                let s = Float(int16Data[i]) / Float(Int16.max)
+                sum += s * s
+            }
+        } else {
+            return 0
+        }
+
+        let rms = sqrt(sum / Float(frameLength))
+        // Speech RMS is typically small; boost so normal talking fills the bars.
+        return min(1, max(0, rms * 12))
     }
 }

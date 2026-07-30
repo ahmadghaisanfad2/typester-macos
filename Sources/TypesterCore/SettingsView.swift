@@ -13,6 +13,8 @@ struct SettingsView: View {
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var showingAddTerm = false
+    @State private var updateStatus: String?
+    @State private var isCheckingUpdate = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +28,12 @@ struct SettingsView: View {
                         ForEach(STTProviderType.allCases, id: \.self) { provider in
                             Text(provider.displayName).tag(provider)
                         }
+                    }
+
+                    LabeledContent("Model") {
+                        Text(settings.sttProvider.modelID)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
 
@@ -90,6 +98,11 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section("Feedback") {
+                    Toggle("Show stream preview", isOn: $settings.showStreamPreview)
+                    Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
                 }
 
                 if settings.sttProvider == .soniox {
@@ -212,15 +225,41 @@ struct SettingsView: View {
 
             Divider()
 
-            HStack {
-                Text("Typester \(appVersion)")
-                    .foregroundStyle(.secondary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Link("GitHub", destination: URL(string: githubURL)!)
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                HStack {
+                    Text("Typester \(appVersion)")
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Link("GitHub", destination: URL(string: githubURL)!)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        checkForUpdates()
+                    } label: {
+                        if isCheckingUpdate {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Check for Updates")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isCheckingUpdate)
+                }
+
+                if let updateStatus {
+                    Text(updateStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .font(.caption)
+            .padding(.horizontal, 20)
             .padding(.vertical, 10)
         }
         .frame(width: 500)
@@ -245,6 +284,90 @@ struct SettingsView: View {
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             checkPermissions()
         }
+    }
+
+    private func checkForUpdates() {
+        isCheckingUpdate = true
+        updateStatus = "Checking for updates…"
+
+        UpdateChecker.shared.checkForUpdates { outcome in
+            isCheckingUpdate = false
+            handleUpdateOutcome(outcome)
+        }
+    }
+
+    private func handleUpdateOutcome(_ outcome: UpdateCheckOutcome) {
+        switch outcome {
+        case .upToDate(let current, let latest):
+            updateStatus = "You're up to date (\(current); latest \(latest))."
+            presentAlert(
+                title: "You're up to date",
+                message: "Typester \(current) is the latest release."
+            )
+
+        case .updateAvailable(let current, let latest, let dmgURL, _):
+            updateStatus = "Update \(latest) available."
+            let alert = NSAlert()
+            alert.messageText = "Update available"
+            alert.informativeText = "Typester \(latest) is available (you have \(current)). Download the DMG now?"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Download")
+            alert.addButton(withTitle: "Cancel")
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else {
+                updateStatus = "Update \(latest) available — download cancelled."
+                return
+            }
+            downloadUpdate(from: dmgURL, latest: latest)
+
+        case .noRelease:
+            updateStatus = "No releases found on GitHub yet."
+            presentAlert(
+                title: "No releases found",
+                message: "This fork has no published GitHub releases yet. Build a DMG locally and publish with scripts/publish-release.sh."
+            )
+
+        case .noDMGAsset(let latest):
+            updateStatus = "Release \(latest) has no DMG asset."
+            presentAlert(
+                title: "DMG not found",
+                message: "Release \(latest) exists but has no .dmg asset. Open \(githubReleasesPageURL) to inspect the release."
+            )
+
+        case .failure(let message):
+            updateStatus = "Update check failed."
+            presentAlert(title: "Update check failed", message: message)
+        }
+    }
+
+    private func downloadUpdate(from url: URL, latest: String) {
+        isCheckingUpdate = true
+        updateStatus = "Downloading Typester \(latest)…"
+
+        UpdateChecker.shared.downloadDMG(from: url) { result in
+            isCheckingUpdate = false
+            switch result {
+            case .success(let fileURL):
+                updateStatus = "Downloaded \(fileURL.lastPathComponent)."
+                UpdateChecker.shared.openDownloadedDMG(fileURL)
+                presentAlert(
+                    title: "Download complete",
+                    message: "Saved to \(fileURL.path).\n\nOpen the DMG and drag Typester to Applications to finish updating."
+                )
+            case .failure(let error):
+                updateStatus = "Download failed."
+                presentAlert(title: "Download failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func presentAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func checkPermissions() {
@@ -306,7 +429,10 @@ struct SettingsView: View {
     private var shortcutDescription: String {
         let keys = settings.shortcutKeys
         if keys.isTripleTap {
-            return KeyboardUtils.formatTripleTapDisplay(modifier: keys.tapModifier ?? "command")
+            return KeyboardUtils.formatModifierTapDisplay(
+                modifier: keys.tapModifier ?? "command",
+                tapCount: keys.tapCount
+            )
         }
         let modifiers = NSEvent.ModifierFlags(rawValue: keys.modifiers)
         return KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keys.keyCode)
@@ -488,7 +614,8 @@ class ShortcutRecorderNSView: NSView {
     var onShortcutRecorded: ((ShortcutKeys, String) -> Void)?
 
     private var monitor: Any?
-    private var tripleTapTimestamps: [Date] = []
+    private var pendingModifierIdentity: String?
+    private var pendingUsedAsChord = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -502,41 +629,67 @@ class ShortcutRecorderNSView: NSView {
             guard let self = self, self.isRecording else { return event }
 
             if event.type == .flagsChanged {
-                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                var modifier: String?
-
-                if flags == .option { modifier = "option" }
-                else if flags == .control { modifier = "control" }
-                else if flags == .shift { modifier = "shift" }
-                else if flags == .command { modifier = "command" }
-
-                if let mod = modifier {
-                    let now = Date()
-                    self.tripleTapTimestamps.append(now)
-                    self.tripleTapTimestamps = self.tripleTapTimestamps.filter { now.timeIntervalSince($0) < 0.5 }
-
-                    if self.tripleTapTimestamps.count >= 3 {
-                        self.tripleTapTimestamps.removeAll()
-                        let keys = ShortcutKeys(modifiers: 0, keyCode: 0, isTripleTap: true, tapModifier: mod)
-                        let display = KeyboardUtils.formatTripleTapDisplay(modifier: mod)
-                        self.onShortcutRecorded?(keys, display)
-                        return nil
-                    }
+                guard let identity = HotkeyManager.modifierIdentity(keyCode: event.keyCode) else {
+                    return event
                 }
+
+                let isDown = HotkeyManager.isIdentityDown(identity, flags: event.modifierFlags)
+
+                if isDown {
+                    // Start a single-modifier capture; finalize on release if unused as a chord.
+                    self.pendingModifierIdentity = identity
+                    self.pendingUsedAsChord = false
+                    return nil
+                }
+
+                if let pending = self.pendingModifierIdentity, pending == identity, !self.pendingUsedAsChord {
+                    self.pendingModifierIdentity = nil
+                    let keys = ShortcutKeys(
+                        modifiers: 0,
+                        keyCode: 0,
+                        isTripleTap: true,
+                        tapModifier: identity,
+                        tapCount: 1
+                    )
+                    let display = KeyboardUtils.formatModifierTapDisplay(modifier: identity, tapCount: 1)
+                    self.onShortcutRecorded?(keys, display)
+                    return nil
+                }
+
+                self.pendingModifierIdentity = nil
+                self.pendingUsedAsChord = false
                 return event
             }
 
             if event.type == .keyDown {
-                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                guard !modifiers.isEmpty else { return event }
+                if self.pendingModifierIdentity != nil {
+                    // Modifier+key chord while capturing a lone modifier — treat as combo instead.
+                    self.pendingUsedAsChord = true
+                    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    let keyCode = event.keyCode
+                    let displayString = KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keyCode)
+                    let keys = ShortcutKeys(
+                        modifiers: modifiers.rawValue,
+                        keyCode: keyCode,
+                        isTripleTap: false,
+                        tapModifier: nil,
+                        tapCount: 1
+                    )
+                    self.pendingModifierIdentity = nil
+                    self.pendingUsedAsChord = false
+                    self.onShortcutRecorded?(keys, displayString)
+                    return nil
+                }
 
+                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 let keyCode = event.keyCode
                 let displayString = KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keyCode)
                 let keys = ShortcutKeys(
                     modifiers: modifiers.rawValue,
                     keyCode: keyCode,
                     isTripleTap: false,
-                    tapModifier: nil
+                    tapModifier: nil,
+                    tapCount: 1
                 )
                 self.onShortcutRecorded?(keys, displayString)
                 return nil

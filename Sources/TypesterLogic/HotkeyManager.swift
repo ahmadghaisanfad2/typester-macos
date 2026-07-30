@@ -6,18 +6,24 @@ public class HotkeyManager {
 
     private var hotkeyRef: EventHotKeyRef?
 
-    // Triple-tap tracking
+    // Modifier-tap tracking
     private var modifierPressTimestamps: [String: [Date]] = [:]
-    private let tripleTapWindow: TimeInterval = 0.5
+    private let tapWindow: TimeInterval = 0.5
     private var localEventMonitor: Any?
     private var globalEventMonitor: Any?
+    private var localKeyDownMonitor: Any?
+    private var globalKeyDownMonitor: Any?
     private var previousModifierFlags: NSEvent.ModifierFlags = []
+
+    /// Armed single-tap: fire on release if not used as a chord modifier.
+    private var pendingSingleTapIdentity: String?
+    private var pendingSingleTapUsedAsModifier = false
 
     public var onHotkeyTriggered: (() -> Void)?
 
     private init() {
         installCarbonHandler()
-        installTripleTapMonitor()
+        installModifierTapMonitors()
     }
 
     // MARK: - Carbon hotkeys (works without accessibility permission)
@@ -93,9 +99,9 @@ public class HotkeyManager {
         return modifiers
     }
 
-    // MARK: - Triple-tap monitor
+    // MARK: - Modifier-tap monitors (single or multi tap)
 
-    private func installTripleTapMonitor() {
+    private func installModifierTapMonitors() {
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
         }
@@ -104,48 +110,138 @@ public class HotkeyManager {
             self?.handleFlagsChanged(event)
             return event
         }
+
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            self?.noteKeyDownWhilePending()
+        }
+
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.noteKeyDownWhilePending()
+            return event
+        }
+    }
+
+    private func noteKeyDownWhilePending() {
+        guard pendingSingleTapIdentity != nil else { return }
+        pendingSingleTapUsedAsModifier = true
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        defer { previousModifierFlags = flags }
-
-        // Only count key-down (modifier newly pressed, not released)
-        var pressedModifier: String?
-        if flags.contains(.option) && !previousModifierFlags.contains(.option) {
-            pressedModifier = "option"
-        } else if flags.contains(.control) && !previousModifierFlags.contains(.control) {
-            pressedModifier = "control"
-        } else if flags.contains(.shift) && !previousModifierFlags.contains(.shift) {
-            pressedModifier = "shift"
-        } else if flags.contains(.command) && !previousModifierFlags.contains(.command) {
-            pressedModifier = "command"
+        let keys = SettingsStore.shared.shortcutKeys
+        guard keys.isTripleTap, let configured = keys.tapModifier else {
+            previousModifierFlags = event.modifierFlags
+            return
         }
 
-        guard let modifier = pressedModifier else { return }
+        guard let identity = Self.modifierIdentity(keyCode: event.keyCode) else {
+            previousModifierFlags = event.modifierFlags
+            return
+        }
+
+        let flags = event.modifierFlags
+        let wasDown = Self.isIdentityDown(identity, flags: previousModifierFlags)
+        let isDown = Self.isIdentityDown(identity, flags: flags)
+        defer { previousModifierFlags = flags }
+
+        let matches = Self.matchesConfigured(identity: identity, configured: configured)
+
+        if keys.tapCount <= 1 {
+            handleSingleTap(
+                identity: identity,
+                matches: matches,
+                wasDown: wasDown,
+                isDown: isDown
+            )
+            return
+        }
+
+        // Multi-tap (legacy triple-tap): count presses within the window.
+        guard matches, isDown, !wasDown else { return }
 
         let now = Date()
-        var timestamps = modifierPressTimestamps[modifier] ?? []
+        var timestamps = modifierPressTimestamps[configured] ?? []
         timestamps.append(now)
-        timestamps = timestamps.filter { now.timeIntervalSince($0) < tripleTapWindow }
-        modifierPressTimestamps[modifier] = timestamps
+        timestamps = timestamps.filter { now.timeIntervalSince($0) < tapWindow }
+        modifierPressTimestamps[configured] = timestamps
 
-        if timestamps.count >= 3 {
-            modifierPressTimestamps[modifier] = []
+        if timestamps.count >= keys.tapCount {
+            modifierPressTimestamps[configured] = []
+            handleHotkey()
+        }
+    }
 
-            let keys = SettingsStore.shared.shortcutKeys
-            if keys.isTripleTap && keys.tapModifier == modifier {
+    private func handleSingleTap(identity: String, matches: Bool, wasDown: Bool, isDown: Bool) {
+        if matches, isDown, !wasDown {
+            pendingSingleTapIdentity = identity
+            pendingSingleTapUsedAsModifier = false
+            return
+        }
+
+        if matches, !isDown, wasDown, pendingSingleTapIdentity == identity {
+            let shouldFire = !pendingSingleTapUsedAsModifier
+            pendingSingleTapIdentity = nil
+            pendingSingleTapUsedAsModifier = false
+            if shouldFire {
                 handleHotkey()
             }
         }
     }
 
+    /// Maps a flagsChanged keyCode to a side-specific modifier identity.
+    public static func modifierIdentity(keyCode: UInt16) -> String? {
+        switch Int(keyCode) {
+        case kVK_Command: return "leftCommand"
+        case kVK_RightCommand: return "rightCommand"
+        case kVK_Option: return "leftOption"
+        case kVK_RightOption: return "rightOption"
+        case kVK_Control: return "leftControl"
+        case kVK_RightControl: return "rightControl"
+        case kVK_Shift: return "leftShift"
+        case kVK_RightShift: return "rightShift"
+        default: return nil
+        }
+    }
+
+    public static func matchesConfigured(identity: String, configured: String) -> Bool {
+        if identity == configured { return true }
+        switch configured {
+        case "command":
+            return identity == "leftCommand" || identity == "rightCommand"
+        case "option":
+            return identity == "leftOption" || identity == "rightOption"
+        case "control":
+            return identity == "leftControl" || identity == "rightControl"
+        case "shift":
+            return identity == "leftShift" || identity == "rightShift"
+        default:
+            return false
+        }
+    }
+
+    /// Side-aware down check using device-dependent modifier bits.
+    public static func isIdentityDown(_ identity: String, flags: NSEvent.ModifierFlags) -> Bool {
+        let raw = flags.rawValue
+        switch identity {
+        case "leftCommand": return raw & 0x00000008 != 0
+        case "rightCommand": return raw & 0x00000010 != 0
+        case "leftOption": return raw & 0x00000020 != 0
+        case "rightOption": return raw & 0x00000040 != 0
+        case "leftShift": return raw & 0x00000002 != 0
+        case "rightShift": return raw & 0x00000004 != 0
+        case "leftControl": return raw & 0x00000001 != 0
+        case "rightControl": return raw & 0x00002000 != 0
+        case "command": return flags.contains(.command)
+        case "option": return flags.contains(.option)
+        case "control": return flags.contains(.control)
+        case "shift": return flags.contains(.shift)
+        default: return false
+        }
+    }
+
     deinit {
-        if let monitor = localEventMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = globalEventMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
+        if let monitor = localEventMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = globalEventMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localKeyDownMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = globalKeyDownMonitor { NSEvent.removeMonitor(monitor) }
     }
 }

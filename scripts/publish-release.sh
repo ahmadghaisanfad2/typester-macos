@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+
+# Build a local DMG and publish it as a GitHub Release on this fork.
+# Does not use GitHub Actions (useful when Actions minutes are exhausted).
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
+
+VERSION="$(python3 - <<'PY'
+import re
+from pathlib import Path
+text = Path("Sources/TypesterLogic/Models.swift").read_text()
+match = re.search(r'appVersion\s*=\s*"([^"]+)"', text)
+if not match:
+    raise SystemExit("Could not find appVersion in Models.swift")
+print(match.group(1))
+PY
+)"
+
+TAG="v${VERSION}"
+DMG_PATH="$PROJECT_DIR/dist/Typester-${VERSION}.dmg"
+NOTES_FILE="$(mktemp)"
+
+cleanup() {
+    rm -f "$NOTES_FILE"
+}
+trap cleanup EXIT
+
+echo "==> Publishing Typester ${VERSION} (${TAG})"
+
+# Keep build-release.sh VERSION in sync
+if grep -q '^VERSION=' "$SCRIPT_DIR/build-release.sh"; then
+    sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" "$SCRIPT_DIR/build-release.sh"
+    rm -f "$SCRIPT_DIR/build-release.sh.bak"
+fi
+
+echo "==> Building release DMG..."
+"$SCRIPT_DIR/build-release.sh"
+
+if [[ ! -f "$DMG_PATH" ]]; then
+    echo "ERROR: Expected DMG not found at $DMG_PATH" >&2
+    exit 1
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "ERROR: gh CLI is required. Install from https://cli.github.com/" >&2
+    exit 1
+fi
+
+cat > "$NOTES_FILE" <<EOF
+## Typester ${VERSION}
+
+Local release built with \`scripts/build-release.sh\` and published with \`scripts/publish-release.sh\`.
+
+### Install
+1. Download \`Typester-${VERSION}.dmg\`
+2. Open the DMG and drag Typester to Applications
+3. If Gatekeeper blocks an unsigned build: Right-click → Open
+EOF
+
+if gh release view "$TAG" >/dev/null 2>&1; then
+    echo "==> Release ${TAG} already exists — uploading/replacing DMG asset..."
+    gh release upload "$TAG" "$DMG_PATH" --clobber
+else
+    echo "==> Creating GitHub release ${TAG}..."
+    gh release create "$TAG" "$DMG_PATH" \
+        --title "Typester ${VERSION}" \
+        --notes-file "$NOTES_FILE"
+fi
+
+echo ""
+echo "==> Published ${TAG}"
+echo "    Release page: $(gh release view "$TAG" --json url -q .url)"
+echo "    Asset: $DMG_PATH"
+echo ""
+echo "Users on your fork build can use Settings → Check for Updates."
