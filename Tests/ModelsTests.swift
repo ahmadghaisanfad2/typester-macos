@@ -35,6 +35,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(defaultKeys.keyCode, 0)
         XCTAssertTrue(defaultKeys.isTripleTap)
         XCTAssertEqual(defaultKeys.tapModifier, "command")
+        XCTAssertEqual(defaultKeys.tapCount, 3)
     }
 
     func testShortcutKeysTripleTapCodable() throws {
@@ -42,7 +43,8 @@ final class ModelsTests: XCTestCase {
             modifiers: 0,
             keyCode: 0,
             isTripleTap: true,
-            tapModifier: "option"
+            tapModifier: "option",
+            tapCount: 3
         )
 
         let encoded = try JSONEncoder().encode(original)
@@ -51,6 +53,29 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(original, decoded)
         XCTAssertTrue(decoded.isTripleTap)
         XCTAssertEqual(decoded.tapModifier, "option")
+        XCTAssertEqual(decoded.tapCount, 3)
+    }
+
+    func testShortcutKeysLegacyDecodeDefaultsTapCountToThree() throws {
+        let json = """
+        {"modifiers":0,"keyCode":0,"isTripleTap":true,"tapModifier":"command"}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ShortcutKeys.self, from: json)
+        XCTAssertEqual(decoded.tapCount, 3)
+    }
+
+    func testShortcutKeysSingleRightOption() throws {
+        let original = ShortcutKeys(
+            modifiers: 0,
+            keyCode: 0,
+            isTripleTap: true,
+            tapModifier: "rightOption",
+            tapCount: 1
+        )
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ShortcutKeys.self, from: encoded)
+        XCTAssertEqual(decoded.tapModifier, "rightOption")
+        XCTAssertEqual(decoded.tapCount, 1)
     }
 
     // MARK: - ActivationMode tests
@@ -146,6 +171,11 @@ final class ModelsTests: XCTestCase {
     func testSTTProviderTypeDisplayName() {
         XCTAssertEqual(STTProviderType.soniox.displayName, "Soniox")
         XCTAssertEqual(STTProviderType.deepgram.displayName, "Deepgram")
+    }
+
+    func testSTTProviderTypeModelID() {
+        XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
+        XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
     }
 
     func testSTTProviderTypeCodable() throws {

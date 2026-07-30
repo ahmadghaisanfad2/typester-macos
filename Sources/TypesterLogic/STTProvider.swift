@@ -10,6 +10,14 @@ public enum STTProviderType: String, Codable, CaseIterable {
         case .deepgram: return "Deepgram"
         }
     }
+
+    /// Model ID sent to the provider API.
+    public var modelID: String {
+        switch self {
+        case .soniox: return "stt-rt-v5"
+        case .deepgram: return "nova-3"
+        }
+    }
 }
 
 public protocol STTProvider: AnyObject {

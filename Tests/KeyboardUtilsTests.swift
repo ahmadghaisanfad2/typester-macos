@@ -126,7 +126,7 @@ final class KeyboardUtilsTests: XCTestCase {
         XCTAssertTrue(display.contains("⌫"))
     }
 
-    // MARK: - formatTripleTapDisplay tests
+    // MARK: - formatTripleTapDisplay / formatModifierTapDisplay tests
 
     func testFormatTripleTapDisplayCommand() {
         XCTAssertEqual(KeyboardUtils.formatTripleTapDisplay(modifier: "command"), "⌘⌘⌘")
@@ -146,5 +146,19 @@ final class KeyboardUtilsTests: XCTestCase {
 
     func testFormatTripleTapDisplayUnknownReturnsEmpty() {
         XCTAssertEqual(KeyboardUtils.formatTripleTapDisplay(modifier: "unknown"), "")
+    }
+
+    func testFormatModifierTapDisplaySingleRightOption() {
+        XCTAssertEqual(
+            KeyboardUtils.formatModifierTapDisplay(modifier: "rightOption", tapCount: 1),
+            "Right ⌥"
+        )
+    }
+
+    func testFormatModifierTapDisplaySingleCommand() {
+        XCTAssertEqual(
+            KeyboardUtils.formatModifierTapDisplay(modifier: "command", tapCount: 1),
+            "⌘"
+        )
     }
 }

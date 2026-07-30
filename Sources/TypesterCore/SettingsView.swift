@@ -29,6 +29,12 @@ struct SettingsView: View {
                             Text(provider.displayName).tag(provider)
                         }
                     }
+
+                    LabeledContent("Model") {
+                        Text(settings.sttProvider.modelID)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 if settings.sttProvider == .soniox {
@@ -92,6 +98,11 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section("Feedback") {
+                    Toggle("Show stream preview", isOn: $settings.showStreamPreview)
+                    Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
                 }
 
                 if settings.sttProvider == .soniox {
@@ -418,7 +429,10 @@ struct SettingsView: View {
     private var shortcutDescription: String {
         let keys = settings.shortcutKeys
         if keys.isTripleTap {
-            return KeyboardUtils.formatTripleTapDisplay(modifier: keys.tapModifier ?? "command")
+            return KeyboardUtils.formatModifierTapDisplay(
+                modifier: keys.tapModifier ?? "command",
+                tapCount: keys.tapCount
+            )
         }
         let modifiers = NSEvent.ModifierFlags(rawValue: keys.modifiers)
         return KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keys.keyCode)
@@ -600,7 +614,8 @@ class ShortcutRecorderNSView: NSView {
     var onShortcutRecorded: ((ShortcutKeys, String) -> Void)?
 
     private var monitor: Any?
-    private var tripleTapTimestamps: [Date] = []
+    private var pendingModifierIdentity: String?
+    private var pendingUsedAsChord = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -614,41 +629,67 @@ class ShortcutRecorderNSView: NSView {
             guard let self = self, self.isRecording else { return event }
 
             if event.type == .flagsChanged {
-                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                var modifier: String?
-
-                if flags == .option { modifier = "option" }
-                else if flags == .control { modifier = "control" }
-                else if flags == .shift { modifier = "shift" }
-                else if flags == .command { modifier = "command" }
-
-                if let mod = modifier {
-                    let now = Date()
-                    self.tripleTapTimestamps.append(now)
-                    self.tripleTapTimestamps = self.tripleTapTimestamps.filter { now.timeIntervalSince($0) < 0.5 }
-
-                    if self.tripleTapTimestamps.count >= 3 {
-                        self.tripleTapTimestamps.removeAll()
-                        let keys = ShortcutKeys(modifiers: 0, keyCode: 0, isTripleTap: true, tapModifier: mod)
-                        let display = KeyboardUtils.formatTripleTapDisplay(modifier: mod)
-                        self.onShortcutRecorded?(keys, display)
-                        return nil
-                    }
+                guard let identity = HotkeyManager.modifierIdentity(keyCode: event.keyCode) else {
+                    return event
                 }
+
+                let isDown = HotkeyManager.isIdentityDown(identity, flags: event.modifierFlags)
+
+                if isDown {
+                    // Start a single-modifier capture; finalize on release if unused as a chord.
+                    self.pendingModifierIdentity = identity
+                    self.pendingUsedAsChord = false
+                    return nil
+                }
+
+                if let pending = self.pendingModifierIdentity, pending == identity, !self.pendingUsedAsChord {
+                    self.pendingModifierIdentity = nil
+                    let keys = ShortcutKeys(
+                        modifiers: 0,
+                        keyCode: 0,
+                        isTripleTap: true,
+                        tapModifier: identity,
+                        tapCount: 1
+                    )
+                    let display = KeyboardUtils.formatModifierTapDisplay(modifier: identity, tapCount: 1)
+                    self.onShortcutRecorded?(keys, display)
+                    return nil
+                }
+
+                self.pendingModifierIdentity = nil
+                self.pendingUsedAsChord = false
                 return event
             }
 
             if event.type == .keyDown {
-                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                guard !modifiers.isEmpty else { return event }
+                if self.pendingModifierIdentity != nil {
+                    // Modifier+key chord while capturing a lone modifier — treat as combo instead.
+                    self.pendingUsedAsChord = true
+                    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    let keyCode = event.keyCode
+                    let displayString = KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keyCode)
+                    let keys = ShortcutKeys(
+                        modifiers: modifiers.rawValue,
+                        keyCode: keyCode,
+                        isTripleTap: false,
+                        tapModifier: nil,
+                        tapCount: 1
+                    )
+                    self.pendingModifierIdentity = nil
+                    self.pendingUsedAsChord = false
+                    self.onShortcutRecorded?(keys, displayString)
+                    return nil
+                }
 
+                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 let keyCode = event.keyCode
                 let displayString = KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keyCode)
                 let keys = ShortcutKeys(
                     modifiers: modifiers.rawValue,
                     keyCode: keyCode,
                     isTripleTap: false,
-                    tapModifier: nil
+                    tapModifier: nil,
+                    tapCount: 1
                 )
                 self.onShortcutRecorded?(keys, displayString)
                 return nil

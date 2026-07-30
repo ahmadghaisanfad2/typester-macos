@@ -70,7 +70,7 @@ public class SonioxClient: STTClientBase {
 
         var config: [String: Any] = [
             "api_key": apiKey,
-            "model": "stt-rt-v5",
+            "model": STTProviderType.soniox.modelID,
             "audio_format": "pcm_s16le",
             "sample_rate": 16000,
             "num_channels": 1,

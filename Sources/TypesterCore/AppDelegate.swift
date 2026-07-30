@@ -214,6 +214,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let shortcutRange = NSRange(location: title.count + 2, length: shortcut.count)
         attributed.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: shortcutRange)
         recordItem.attributedTitle = attributed
+        recordItem.target = self
 
         menu.addItem(recordItem)
 
@@ -286,14 +287,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             action: #selector(openTeachDictionary),
             keyEquivalent: ""
         )
+        teachItem.target = self
         teachItem.isEnabled = !lastTranscript.isEmpty
         menu.addItem(teachItem)
 
-        menu.addItem(NSMenuItem(
+        let settingsItem = NSMenuItem(
             title: "Settings...",
             action: #selector(openSettings),
             keyEquivalent: ""
-        ))
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
 
@@ -464,6 +468,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.sttProvider.sendAudio(data)
         }
 
+        audioRecorder.onAudioLevel = { [weak self] level in
+            self?.subtitleOverlay.updateAudioLevel(level)
+        }
+
         audioRecorder.onError = { [weak self] error in
             self?.stopRecording()
         }
@@ -535,6 +543,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         accumulatedText = ""
         rebuildMenu()
 
+        FeedbackSoundPlayer.playStart()
+
         let frontApp = NSWorkspace.shared.frontmostApplication
         let appName = frontApp?.localizedName ?? ""
         let appIcon = frontApp?.icon
@@ -557,6 +567,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.image = normalIcon
         rebuildMenu()
 
+        FeedbackSoundPlayer.playStop()
+
         audioRecorder.stopRecording()
 
         // Small delay to let provider process last audio chunks before finalizing
@@ -577,7 +589,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let keys = SettingsStore.shared.shortcutKeys
         if keys.isTripleTap {
-            return KeyboardUtils.formatTripleTapDisplay(modifier: keys.tapModifier ?? "command")
+            return KeyboardUtils.formatModifierTapDisplay(
+                modifier: keys.tapModifier ?? "command",
+                tapCount: keys.tapCount
+            )
         }
 
         let modifiers = NSEvent.ModifierFlags(rawValue: keys.modifiers)

@@ -83,16 +83,31 @@ public enum KeyboardUtils {
         return result
     }
 
-    /// Formats a triple-tap modifier display string (e.g., "⌘⌘⌘").
-    public static func formatTripleTapDisplay(modifier: String) -> String {
-        let symbol: String
+    /// Formats a modifier-tap display string.
+    /// - Single tap: "Right ⌥", "⌘", etc.
+    /// - Multi tap: "⌘⌘⌘"
+    public static func formatModifierTapDisplay(modifier: String, tapCount: Int = 1) -> String {
+        let count = max(1, tapCount)
+
         switch modifier {
-        case "command": symbol = "⌘"
-        case "option": symbol = "⌥"
-        case "control": symbol = "⌃"
-        case "shift": symbol = "⇧"
+        case "leftCommand": return count == 1 ? "Left ⌘" : String(repeating: "⌘", count: count)
+        case "rightCommand": return count == 1 ? "Right ⌘" : String(repeating: "⌘", count: count)
+        case "leftOption": return count == 1 ? "Left ⌥" : String(repeating: "⌥", count: count)
+        case "rightOption": return count == 1 ? "Right ⌥" : String(repeating: "⌥", count: count)
+        case "leftControl": return count == 1 ? "Left ⌃" : String(repeating: "⌃", count: count)
+        case "rightControl": return count == 1 ? "Right ⌃" : String(repeating: "⌃", count: count)
+        case "leftShift": return count == 1 ? "Left ⇧" : String(repeating: "⇧", count: count)
+        case "rightShift": return count == 1 ? "Right ⇧" : String(repeating: "⇧", count: count)
+        case "command": return String(repeating: "⌘", count: count)
+        case "option": return String(repeating: "⌥", count: count)
+        case "control": return String(repeating: "⌃", count: count)
+        case "shift": return String(repeating: "⇧", count: count)
         default: return ""
         }
-        return "\(symbol)\(symbol)\(symbol)"
+    }
+
+    /// Formats a triple-tap modifier display string (e.g., "⌘⌘⌘").
+    public static func formatTripleTapDisplay(modifier: String) -> String {
+        formatModifierTapDisplay(modifier: modifier, tapCount: 3)
     }
 }

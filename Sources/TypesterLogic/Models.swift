@@ -235,20 +235,46 @@ public let githubReleasesPageURL = "\(githubURL)/releases"
 public struct ShortcutKeys: Codable, Equatable {
     public var modifiers: UInt
     public var keyCode: UInt16
+    /// True when the shortcut is a modifier-only tap (not a Carbon key combo).
     public var isTripleTap: Bool
+    /// Modifier identity: "command"/"option"/… or side-specific "rightOption"/"leftCommand"/…
     public var tapModifier: String?
+    /// How many taps are required in the window (1 = single press). Defaults to 3 for legacy triple-tap saves.
+    public var tapCount: Int
 
-    public init(modifiers: UInt, keyCode: UInt16, isTripleTap: Bool, tapModifier: String? = nil) {
+    public init(
+        modifiers: UInt,
+        keyCode: UInt16,
+        isTripleTap: Bool,
+        tapModifier: String? = nil,
+        tapCount: Int = 1
+    ) {
         self.modifiers = modifiers
         self.keyCode = keyCode
         self.isTripleTap = isTripleTap
         self.tapModifier = tapModifier
+        self.tapCount = max(1, tapCount)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        modifiers = try container.decode(UInt.self, forKey: .modifiers)
+        keyCode = try container.decode(UInt16.self, forKey: .keyCode)
+        isTripleTap = try container.decode(Bool.self, forKey: .isTripleTap)
+        tapModifier = try container.decodeIfPresent(String.self, forKey: .tapModifier)
+        // Legacy saves had no tapCount; triple-tap mode implied 3 presses.
+        if let count = try container.decodeIfPresent(Int.self, forKey: .tapCount) {
+            tapCount = max(1, count)
+        } else {
+            tapCount = isTripleTap ? 3 : 1
+        }
     }
 
     public static let defaultTripleCmd = ShortcutKeys(
         modifiers: 0,
         keyCode: 0,
         isTripleTap: true,
-        tapModifier: "command"
+        tapModifier: "command",
+        tapCount: 3
     )
 }
