@@ -5,30 +5,41 @@ set -e
 APP_NAME="Typester"
 BUNDLE_ID="com.typester.app"
 TEAM_ID="R892A93W42"
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/.build/release"
+BUILD_DIR="$PROJECT_DIR/.build/release-packaging"
 DMG_STAGING="$PROJECT_DIR/dist/dmg-staging"
 APP_BUNDLE="$DMG_STAGING/$APP_NAME.app"
 DMG_PATH="$PROJECT_DIR/dist/$APP_NAME-$VERSION.dmg"
+ARM64_BIN="$BUILD_DIR/typester-arm64"
+X86_BIN="$BUILD_DIR/typester-x86_64"
+UNIVERSAL_BIN="$BUILD_DIR/typester"
 
 cd "$PROJECT_DIR"
+mkdir -p "$BUILD_DIR"
+
+# Newer SwiftPM/Xcode write a single .build/release/typester and overwrite it per
+# --arch build, so copy each arch aside before the next build.
 
 echo "==> Building release binary for arm64..."
-swift build -c release --arch arm64
+swift build -c release --arch arm64 --product typester
+cp -f "$PROJECT_DIR/.build/release/typester" "$ARM64_BIN"
 
 echo "==> Building release binary for x86_64..."
-swift build -c release --arch x86_64
+if swift build -c release --arch x86_64 --product typester; then
+    cp -f "$PROJECT_DIR/.build/release/typester" "$X86_BIN"
+    echo "==> Creating universal binary..."
+    lipo -create "$ARM64_BIN" "$X86_BIN" -output "$UNIVERSAL_BIN"
+else
+    echo "==> x86_64 build failed or unavailable; packaging arm64-only binary..."
+    cp -f "$ARM64_BIN" "$UNIVERSAL_BIN"
+fi
 
-echo "==> Creating universal binary..."
-mkdir -p "$BUILD_DIR"
-lipo -create \
-    "$PROJECT_DIR/.build/arm64-apple-macosx/release/typester" \
-    "$PROJECT_DIR/.build/x86_64-apple-macosx/release/typester" \
-    -output "$BUILD_DIR/typester"
+file "$UNIVERSAL_BIN"
+lipo -info "$UNIVERSAL_BIN" || true
 
 echo "==> Creating app bundle..."
 rm -rf dist
@@ -40,7 +51,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 ln -s /Applications "$DMG_STAGING/Applications"
 
 # Copy binary
-cp "$BUILD_DIR/typester" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+cp "$UNIVERSAL_BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Copy icons
 cp "Assets/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
@@ -117,4 +128,5 @@ else
     echo "    DMG: $DMG_PATH"
     echo ""
     echo "NOTE: To distribute, you need a Developer ID certificate from developer.apple.com"
+    echo "First open may require Right-click → Open (Gatekeeper)."
 fi
