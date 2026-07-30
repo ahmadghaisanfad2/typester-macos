@@ -283,14 +283,22 @@ struct OnboardingView: View {
     @ViewBuilder
     private var accessibilityStepContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button("Open System Settings") {
-                TextPaster.openAccessibilitySettings()
-            }
-            .buttonStyle(.bordered)
+            HStack(spacing: 8) {
+                Button("Open System Settings") {
+                    TextPaster.openAccessibilitySettings()
+                }
+                .buttonStyle(.bordered)
 
-            Text("Find Typester in the list and enable it, then come back here.")
+                Button("Relaunch") {
+                    TextPaster.relaunchApp()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Text("Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

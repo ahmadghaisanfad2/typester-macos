@@ -206,23 +206,38 @@ struct SettingsView: View {
                         }
                     }
 
-                    HStack {
-                        Circle()
-                            .fill(accessibilityGranted ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Circle()
+                                .fill(accessibilityGranted ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
 
-                        Text("Accessibility")
+                            Text("Accessibility")
 
-                        Spacer()
+                            Spacer()
 
-                        if accessibilityGranted {
-                            Text("Granted").foregroundStyle(.secondary)
-                        } else {
-                            Button("Open Settings") {
-                                TextPaster.openAccessibilitySettings()
+                            if accessibilityGranted {
+                                Text("Granted").foregroundStyle(.secondary)
+                            } else {
+                                Button("Open Settings") {
+                                    TextPaster.openAccessibilitySettings()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button("Relaunch") {
+                                    TextPaster.relaunchApp()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        }
+
+                        if !accessibilityGranted {
+                            Text("If the toggle is already on, remove Typester from the Accessibility list, add /Applications/Typester.app again, turn it on, then Relaunch. macOS does not apply a new grant until Typester restarts.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

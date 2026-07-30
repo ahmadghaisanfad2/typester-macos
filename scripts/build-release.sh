@@ -5,7 +5,7 @@ set -e
 APP_NAME="Typester"
 BUNDLE_ID="com.typester.app"
 TEAM_ID="R892A93W42"
-VERSION="1.6.1"
+VERSION="1.6.2"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -93,13 +93,19 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 </plist>
 EOF
 
-# Check if we should sign
+# Always codesign the bundle so Info.plist is bound and the identifier matches
+# CFBundleIdentifier. Without this, TCC Accessibility grants often attach to a
+# stale/adhoc linker identity and AXIsProcessTrusted() stays false after rebuilds.
+ENTITLEMENTS="$PROJECT_DIR/Sources/typester.entitlements"
+
 if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
     SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
 
     echo "==> Signing app with: $SIGNING_IDENTITY"
-    codesign --force --options runtime --sign "$SIGNING_IDENTITY" \
-        --entitlements "$PROJECT_DIR/Sources/typester.entitlements" \
+    codesign --force --deep --options runtime \
+        --identifier "$BUNDLE_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        --sign "$SIGNING_IDENTITY" \
         "$APP_BUNDLE"
 
     echo "==> Creating DMG..."
@@ -117,16 +123,23 @@ if security find-identity -v -p codesigning | grep -q "Developer ID Application"
     echo "    xcrun notarytool submit \"$DMG_PATH\" --apple-id YOUR_APPLE_ID --team-id $TEAM_ID --password APP_SPECIFIC_PASSWORD --wait"
     echo "    xcrun stapler staple \"$DMG_PATH\""
 else
-    echo "==> No Developer ID certificate found, skipping signing..."
+    echo "==> No Developer ID certificate; ad-hoc signing with identifier $BUNDLE_ID..."
+    codesign --force --deep \
+        --identifier "$BUNDLE_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        --sign - \
+        "$APP_BUNDLE"
 
-    echo "==> Creating unsigned DMG..."
+    echo "==> Creating DMG..."
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
 
     echo ""
-    echo "==> Build complete (UNSIGNED)!"
+    echo "==> Build complete (ad-hoc signed)!"
     echo "    App: $APP_BUNDLE"
     echo "    DMG: $DMG_PATH"
     echo ""
-    echo "NOTE: To distribute, you need a Developer ID certificate from developer.apple.com"
-    echo "First open may require Right-click → Open (Gatekeeper)."
+    echo "NOTE: Ad-hoc builds get a new code identity each rebuild. After installing,"
+    echo "remove Typester from System Settings → Privacy → Accessibility, re-add"
+    echo "/Applications/Typester.app, enable it, then quit and reopen Typester."
+    echo "For distribution, use a Developer ID certificate from developer.apple.com."
 fi

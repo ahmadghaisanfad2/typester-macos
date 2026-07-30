@@ -22,6 +22,18 @@ public class TextPaster {
         }
     }
 
+    /// Relaunch so a newly granted Accessibility toggle is picked up by AXIsProcessTrusted().
+    public static func relaunchApp() {
+        let url = Bundle.main.bundleURL
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
     // MARK: - Paste
 
     public func paste(_ text: String) {
