@@ -9,15 +9,16 @@ public struct OpenAIConnectionConfig: STTConnectionConfig {
     public func makeWebSocketRequest() -> URLRequest? {
         guard let apiKey = apiKey else { return nil }
 
-        let model = SettingsStore.shared.openaiModel.rawValue
         var components = URLComponents(string: "wss://api.openai.com/v1/realtime")!
-        components.queryItems = [URLQueryItem(name: "model", value: model)]
+        // Open a transcription session (not a voice-agent realtime session).
+        // Transcription model is set in session.update → audio.input.transcription.model.
+        components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
 
         guard let url = components.url else { return nil }
 
         var request = URLRequest(url: url)
+        // GA Realtime WebSocket: Authorization only (no OpenAI-Beta; that selects the retired beta API).
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
         return request
     }
 
