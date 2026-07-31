@@ -1,0 +1,14 @@
+Dictation feedback sounds
+=========================
+
+dictation-start.wav
+  Source: Universfield — "New Notification 07"
+  https://pixabay.com/sound-effects/film-special-effects-new-notification-07-210334/
+  License: Pixabay Content License (free commercial/personal use; no attribution required).
+  Do not redistribute the file on a standalone basis.
+
+dictation-stop.wav
+  Source: Mixkit — "Negative tone interface tap"
+  https://mixkit.co/free-sound-effects/interface/
+  License: Mixkit Sound Effects Free License (free commercial/personal use; attribution optional).
+  Do not redistribute the file as stock/standalone.

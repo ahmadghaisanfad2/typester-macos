@@ -395,6 +395,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(.separator())
 
+        menu.addItem(makeSoundsMenuItem())
+
         menu.addItem(makeRecentMenuItem())
 
         let teachItem = NSMenuItem(
@@ -423,6 +425,72 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ))
 
         statusItem.menu = menu
+    }
+
+    private func makeSoundsMenuItem() -> NSMenuItem {
+        let soundsMenu = NSMenu()
+
+        let playItem = NSMenuItem(
+            title: "Play sounds",
+            action: #selector(toggleDictationSounds),
+            keyEquivalent: ""
+        )
+        playItem.target = self
+        playItem.state = SettingsStore.shared.playDictationSounds ? .on : .off
+        soundsMenu.addItem(playItem)
+
+        let volumeItem = NSMenuItem()
+        volumeItem.view = makeDictationVolumeSliderView()
+        soundsMenu.addItem(volumeItem)
+
+        let soundsItem = NSMenuItem(title: "Sounds", action: nil, keyEquivalent: "")
+        soundsItem.submenu = soundsMenu
+        return soundsItem
+    }
+
+    private func makeDictationVolumeSliderView() -> NSView {
+        // Knob draws outside the track; give the custom menu item enough height and disable clipping.
+        let width: CGFloat = 220
+        let height: CGFloat = 48
+        let sliderHeight: CGFloat = 28
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        view.clipsToBounds = false
+        view.wantsLayer = true
+        view.layer?.masksToBounds = false
+
+        let label = NSTextField(labelWithString: "Volume")
+        label.font = .menuFont(ofSize: 13)
+        label.textColor = .labelColor
+        label.frame = NSRect(x: 14, y: (height - 16) / 2, width: 52, height: 16)
+
+        let slider = NSSlider(
+            value: Double(SettingsStore.shared.dictationSoundVolume),
+            minValue: 0,
+            maxValue: 1,
+            target: self,
+            action: #selector(dictationSoundVolumeChanged(_:))
+        )
+        slider.isContinuous = true
+        slider.isEnabled = SettingsStore.shared.playDictationSounds
+        slider.frame = NSRect(
+            x: 68,
+            y: (height - sliderHeight) / 2,
+            width: width - 82,
+            height: sliderHeight
+        )
+
+        view.addSubview(label)
+        view.addSubview(slider)
+        return view
+    }
+
+    @objc private func toggleDictationSounds() {
+        SettingsStore.shared.playDictationSounds.toggle()
+        rebuildMenu()
+    }
+
+    @objc private func dictationSoundVolumeChanged(_ sender: NSSlider) {
+        SettingsStore.shared.dictationSoundVolume = Float(sender.doubleValue)
     }
 
     private func makeRecentMenuItem() -> NSMenuItem {
@@ -891,6 +959,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func setupAudioPipeline() {
         syncAudioSampleRate()
+        // Pre-warm CoreAudio/AVAudioEngine — cold creation can take multiple seconds with Discord open.
+        audioRecorder.prepareEngine()
 
         audioRecorder.onAudioBuffer = { [weak self] data in
             guard let self else { return }

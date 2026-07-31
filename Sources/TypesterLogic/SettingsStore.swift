@@ -109,6 +109,18 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Playback level for dictation start/stop sounds, 0...1.
+    @Published public var dictationSoundVolume: Float = 0.75 {
+        didSet {
+            let clamped = min(1, max(0, dictationSoundVolume))
+            if clamped != dictationSoundVolume {
+                dictationSoundVolume = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: dictationSoundVolumeKey)
+        }
+    }
+
     /// When true, paste each time the STT provider detects a pause (endpoint).
     /// When false (default), keep streaming in the overlay and paste only when you stop.
     @Published public var pasteOnPause: Bool = false {
@@ -132,6 +144,7 @@ public class SettingsStore: ObservableObject {
     private let showStreamPreviewKey = "showStreamPreview"
     private let legacyShowStreamAnimationKey = "showStreamAnimation"
     private let playDictationSoundsKey = "playDictationSounds"
+    private let dictationSoundVolumeKey = "dictationSoundVolume"
     private let pasteOnPauseKey = "pasteOnPause"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
@@ -340,6 +353,9 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: playDictationSoundsKey) != nil {
             playDictationSounds = UserDefaults.standard.bool(forKey: playDictationSoundsKey)
+        }
+        if UserDefaults.standard.object(forKey: dictationSoundVolumeKey) != nil {
+            dictationSoundVolume = UserDefaults.standard.float(forKey: dictationSoundVolumeKey)
         }
         if UserDefaults.standard.object(forKey: pasteOnPauseKey) != nil {
             pasteOnPause = UserDefaults.standard.bool(forKey: pasteOnPauseKey)
