@@ -13,8 +13,20 @@ public class PressKeyMonitor {
     private var usedAsModifier = false
     private var activationTimer: DispatchWorkItem?
     private let activationDelay: TimeInterval = 0.05
+    /// When true, ignore flag/key events so synthetic ⌘V does not start dictation.
+    private var isSuppressed = false
 
     private init() {}
+
+    public func suppress() {
+        isSuppressed = true
+        activationTimer?.cancel()
+        activationTimer = nil
+    }
+
+    public func unsuppress() {
+        isSuppressed = false
+    }
 
     private var needsKeyDownMonitoring: Bool {
         switch SettingsStore.shared.pressToSpeakKey {
@@ -102,6 +114,10 @@ public class PressKeyMonitor {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if isSuppressed {
             return Unmanaged.passUnretained(event)
         }
 
