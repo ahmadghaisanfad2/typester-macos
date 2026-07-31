@@ -13,6 +13,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private let audioRecorder = AudioRecorder()
     private let textPaster = TextPaster()
+    private let historyStore = TranscriptHistoryStore.shared
     private var sttProvider: STTProvider!
     private var lastTranscript = ""
 
@@ -30,9 +31,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var isRecording = false
     private var sessionDiscarded = false
     private var accumulatedText = ""
+    private var lastInterimText = ""
+    private var sessionAudioPCM = Data()
+    private var sessionAppName = ""
+    private var sessionSampleRate: Double = 16_000
+    private var sessionPastedText = ""
+    private var isRetranscribing = false
+    private var retranscribeEntryID: UUID?
+    private var pendingFinalizeWorkItem: DispatchWorkItem?
     private var normalIcon: NSImage?
     private var recordingIcon: NSImage?
-    private var pendingFinalizeWorkItem: DispatchWorkItem?
     private let subtitleOverlay = SubtitleOverlay.shared
 
     public override init() {
@@ -48,6 +56,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupHotkey()
         setupPressKeyMonitor()
         setupAudioPipeline()
+        setupPasteSuppression()
+
+        if let latest = historyStore.entries.first(where: { $0.hasText }) {
+            lastTranscript = latest.text
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -61,6 +74,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showOnboarding()
         } else {
             updateMonitoringMode()
+        }
+    }
+
+    private func setupPasteSuppression() {
+        textPaster.onPasteSimulationBegin = {
+            PressKeyMonitor.shared.suppress()
+        }
+        textPaster.onPasteSimulationEnd = {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                PressKeyMonitor.shared.unsuppress()
+            }
         }
     }
 
@@ -106,14 +130,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func setupSTTCallbacks() {
-        sttProvider.onConnected = {
+        sttProvider.onConnected = { [weak self] in
             Debug.log("STT connected, buffered audio flushed")
+            self?.onSTTConnected()
         }
 
         sttProvider.onDisconnected = { [weak self] in
             guard let self = self else { return }
             self.subtitleOverlay.hide()
             self.audioRecorder.stopRecording()
+            if self.isRetranscribing {
+                self.finishRetranscribe(success: false)
+                return
+            }
             guard self.isRecording else { return }
             self.isRecording = false
             self.statusItem.button?.image = self.normalIcon
@@ -125,9 +154,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Debug.log("onTranscript: \"\(text)\" isFinal=\(isFinal)")
             if isFinal {
                 self.accumulatedText += text
-                self.subtitleOverlay.updateFinal(text)
+                self.lastInterimText = ""
+                if !self.isRetranscribing {
+                    self.subtitleOverlay.updateFinal(text)
+                }
             } else {
-                self.subtitleOverlay.updateInterim(text)
+                self.lastInterimText = text
+                if !self.isRetranscribing {
+                    self.subtitleOverlay.updateInterim(text)
+                }
             }
         }
 
@@ -135,33 +170,70 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self = self else { return }
             // Default: keep accumulating through pauses; paste only on finalize (user stops).
             // Optional paste-on-pause pastes each endpoint utterance immediately.
+            guard !self.isRetranscribing else { return }
             guard SettingsStore.shared.pasteOnPause else { return }
-            self.pasteAccumulatedTranscript()
+            self.pasteAccumulatedTranscript(saveHistory: false)
             self.subtitleOverlay.clearText()
         }
 
         sttProvider.onFinalized = { [weak self] in
             guard let self = self else { return }
+            if self.isRetranscribing {
+                self.handleRetranscribeFinalized()
+                return
+            }
             if self.sessionDiscarded {
                 self.sessionDiscarded = false
                 self.subtitleOverlay.hide()
                 self.sttProvider.disconnect()
                 return
             }
-            self.pasteAccumulatedTranscript()
+            self.pasteAccumulatedTranscript(saveHistory: true)
             self.subtitleOverlay.hide()
             self.sttProvider.disconnect()
         }
 
         sttProvider.onError = { [weak self] error in
             guard let self = self else { return }
+            if self.isRetranscribing {
+                self.finishRetranscribe(success: false)
+                self.sttProvider.disconnect()
+                self.showError(error)
+                return
+            }
             self.isRecording = false
             self.statusItem.button?.image = self.normalIcon
             self.subtitleOverlay.hide()
-            self.rebuildMenu()
             self.audioRecorder.stopRecording()
+            let current = TranscriptPastePayload.resolve(
+                accumulatedText: self.accumulatedText,
+                lastInterimText: self.lastInterimText
+            ) ?? ""
+            let historyText: String
+            if self.sessionPastedText.isEmpty {
+                historyText = current
+            } else if current.isEmpty {
+                historyText = self.sessionPastedText
+            } else {
+                historyText = self.sessionPastedText + " " + current
+            }
+            self.saveSessionToHistory(text: historyText, status: .failed)
+            self.accumulatedText = ""
+            self.lastInterimText = ""
+            self.sessionPastedText = ""
+            self.rebuildMenu()
             self.showError(error)
         }
+    }
+
+    private func onSTTConnected() {
+        guard isRetranscribing, let id = retranscribeEntryID,
+              let entry = historyStore.entries.first(where: { $0.id == id }),
+              let url = historyStore.audioURL(for: entry),
+              let pcm = try? Data(contentsOf: url), !pcm.isEmpty else {
+            return
+        }
+        replayPCM(pcm, sampleRate: entry.sampleRate)
     }
 
     // MARK: - Icons
@@ -313,6 +385,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(.separator())
 
+        menu.addItem(makeRecentMenuItem())
+
         let teachItem = NSMenuItem(
             title: "Teach last transcript…",
             action: #selector(openTeachDictionary),
@@ -341,14 +415,307 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.menu = menu
     }
 
-    private func pasteAccumulatedTranscript() {
-        let text = accumulatedText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+    private func makeRecentMenuItem() -> NSMenuItem {
+        let recentMenu = NSMenu()
+        let entries = historyStore.entries
+
+        if entries.isEmpty {
+            let empty = NSMenuItem(title: "No recent transcriptions", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            recentMenu.addItem(empty)
+            recentMenu.addItem(.separator())
+            let openFolderItem = NSMenuItem(
+                title: "Open Recordings Folder",
+                action: #selector(openRecordingsFolder),
+                keyEquivalent: ""
+            )
+            openFolderItem.target = self
+            recentMenu.addItem(openFolderItem)
+        } else {
+            for entry in entries {
+                let item = NSMenuItem(title: entry.menuTitle, action: nil, keyEquivalent: "")
+                let sub = NSMenu()
+
+                let pasteItem = NSMenuItem(
+                    title: "Paste",
+                    action: #selector(pasteHistoryEntry(_:)),
+                    keyEquivalent: ""
+                )
+                pasteItem.target = self
+                pasteItem.representedObject = entry.id
+                pasteItem.isEnabled = entry.hasText && !isRetranscribing
+                sub.addItem(pasteItem)
+
+                let copyItem = NSMenuItem(
+                    title: "Copy",
+                    action: #selector(copyHistoryEntry(_:)),
+                    keyEquivalent: ""
+                )
+                copyItem.target = self
+                copyItem.representedObject = entry.id
+                copyItem.isEnabled = entry.hasText
+                sub.addItem(copyItem)
+
+                let retryItem = NSMenuItem(
+                    title: isRetranscribing && retranscribeEntryID == entry.id
+                        ? "Re-transcribing…"
+                        : "Re-transcribe",
+                    action: #selector(retranscribeHistoryEntry(_:)),
+                    keyEquivalent: ""
+                )
+                retryItem.target = self
+                retryItem.representedObject = entry.id
+                retryItem.isEnabled = historyStore.hasAudio(for: entry)
+                    && !isRecording
+                    && !isRetranscribing
+                sub.addItem(retryItem)
+
+                let revealItem = NSMenuItem(
+                    title: "Show in Finder",
+                    action: #selector(revealHistoryAudio(_:)),
+                    keyEquivalent: ""
+                )
+                revealItem.target = self
+                revealItem.representedObject = entry.id
+                revealItem.isEnabled = historyStore.hasAudio(for: entry)
+                sub.addItem(revealItem)
+
+                item.submenu = sub
+                recentMenu.addItem(item)
+            }
+
+            recentMenu.addItem(.separator())
+
+            let openFolderItem = NSMenuItem(
+                title: "Open Recordings Folder",
+                action: #selector(openRecordingsFolder),
+                keyEquivalent: ""
+            )
+            openFolderItem.target = self
+            recentMenu.addItem(openFolderItem)
+
+            let clearItem = NSMenuItem(
+                title: "Clear Recent History…",
+                action: #selector(clearRecentHistory),
+                keyEquivalent: ""
+            )
+            clearItem.target = self
+            clearItem.isEnabled = !isRetranscribing
+            recentMenu.addItem(clearItem)
+        }
+
+        let recentItem = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
+        recentItem.submenu = recentMenu
+        return recentItem
+    }
+
+    private func pasteAccumulatedTranscript(saveHistory: Bool) {
+        let raw = TranscriptPastePayload.resolve(
+            accumulatedText: accumulatedText,
+            lastInterimText: lastInterimText
+        )
+
+        defer {
+            accumulatedText = ""
+            lastInterimText = ""
+        }
+
+        if let text = raw {
+            lastTranscript = text
+            let replaced = SettingsStore.shared.applyReplacements(text)
+            let formatted = TranscriptFormatter.format(replaced)
+            let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
+            textPaster.paste(pasteText)
+            let stored = pasteText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if sessionPastedText.isEmpty {
+                sessionPastedText = stored
+            } else {
+                sessionPastedText += " " + stored
+            }
+        }
+
+        if saveHistory {
+            let historyText = sessionPastedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if historyText.isEmpty {
+                saveSessionToHistory(text: "", status: .failed)
+            } else {
+                saveSessionToHistory(text: historyText, status: .succeeded)
+            }
+            sessionPastedText = ""
+        }
+        rebuildMenu()
+    }
+
+    private func saveSessionToHistory(text: String, status: TranscriptEntryStatus) {
+        guard !sessionAudioPCM.isEmpty else { return }
+        let pcm = sessionAudioPCM
+        let appName = sessionAppName
+        let sampleRate = sessionSampleRate
+        sessionAudioPCM = Data()
+
+        do {
+            _ = try historyStore.add(
+                text: text,
+                status: status,
+                appName: appName,
+                sampleRate: sampleRate,
+                audioPCM: pcm
+            )
+        } catch {
+            Debug.log("Failed to save transcript history: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func pasteHistoryEntry(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let entry = historyStore.entries.first(where: { $0.id == id }),
+              entry.hasText else { return }
+        let pasteText = entry.text.hasSuffix(" ") ? entry.text : entry.text + " "
+        textPaster.paste(pasteText)
+    }
+
+    @objc private func copyHistoryEntry(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let entry = historyStore.entries.first(where: { $0.id == id }),
+              entry.hasText else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
+    }
+
+    @objc private func retranscribeHistoryEntry(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        startRetranscribe(entryID: id)
+    }
+
+    @objc private func revealHistoryAudio(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let entry = historyStore.entries.first(where: { $0.id == id }),
+              let url = historyStore.audioURL(for: entry),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func openRecordingsFolder() {
+        let directory = historyStore.directoryURL
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
+    }
+
+    @objc private func clearRecentHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear recent history?"
+        alert.informativeText = "This permanently deletes the last transcriptions and their saved audio."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear")
+        alert.addButton(withTitle: "Cancel")
+
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            try? historyStore.clearAll()
+            lastTranscript = ""
+            rebuildMenu()
+        }
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    private func startRetranscribe(entryID: UUID) {
+        guard !isRecording, !isRetranscribing else { return }
+        guard hasAPIKeyForCurrentProvider() else {
+            openSettings()
+            return
+        }
+        guard let entry = historyStore.entries.first(where: { $0.id == entryID }),
+              historyStore.hasAudio(for: entry) else { return }
+
+        pendingFinalizeWorkItem?.cancel()
+        pendingFinalizeWorkItem = nil
+
+        // Disconnect any prior socket before flipping the retranscribe flag so
+        // onDisconnected does not treat this teardown as a failed re-transcribe.
+        sttProvider.disconnect()
+
+        isRetranscribing = true
+        retranscribeEntryID = entryID
+        accumulatedText = ""
+        lastInterimText = ""
+        rebuildMenu()
+
+        sttProvider.connect()
+    }
+
+    private func replayPCM(_ pcm: Data, sampleRate: Double) {
+        let bytesPerSecond = Int(sampleRate) * MemoryLayout<Int16>.size
+        let chunkSize = max(bytesPerSecond / 10, MemoryLayout<Int16>.size * 2) // ~100ms
+        var offset = 0
+
+        func sendNextChunk() {
+            guard isRetranscribing else { return }
+            if offset >= pcm.count {
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.sttProvider.sendFinalize()
+                }
+                pendingFinalizeWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+                return
+            }
+
+            let end = min(offset + chunkSize, pcm.count)
+            let chunk = pcm.subdata(in: offset..<end)
+            offset = end
+            sttProvider.sendAudio(chunk)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                sendNextChunk()
+            }
+        }
+
+        sendNextChunk()
+    }
+
+    private func handleRetranscribeFinalized() {
+        let raw = TranscriptPastePayload.resolve(
+            accumulatedText: accumulatedText,
+            lastInterimText: lastInterimText
+        )
+        accumulatedText = ""
+        lastInterimText = ""
+
+        guard let text = raw else {
+            finishRetranscribe(success: false)
+            sttProvider.disconnect()
+            showError("Re-transcription produced no text. Audio was kept for another try.")
+            return
+        }
+
         lastTranscript = text
         let replaced = SettingsStore.shared.applyReplacements(text)
         let formatted = TranscriptFormatter.format(replaced)
-        textPaster.paste(formatted + " ")
-        accumulatedText = ""
+        let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
+        textPaster.paste(pasteText)
+
+        if let id = retranscribeEntryID,
+           var entry = historyStore.entries.first(where: { $0.id == id }) {
+            entry.text = pasteText.trimmingCharacters(in: .whitespacesAndNewlines)
+            entry.status = .succeeded
+            try? historyStore.update(entry)
+        }
+
+        finishRetranscribe(success: true)
+        sttProvider.disconnect()
+    }
+
+    private func finishRetranscribe(success: Bool) {
+        guard isRetranscribing else { return }
+        isRetranscribing = false
+        retranscribeEntryID = nil
+        pendingFinalizeWorkItem?.cancel()
+        pendingFinalizeWorkItem = nil
+        Debug.log("Re-transcribe finished success=\(success)")
         rebuildMenu()
     }
 
@@ -502,7 +869,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         syncAudioSampleRate()
 
         audioRecorder.onAudioBuffer = { [weak self] data in
-            self?.sttProvider.sendAudio(data)
+            guard let self else { return }
+            if !self.isRetranscribing {
+                self.sessionAudioPCM.append(data)
+            }
+            self.sttProvider.sendAudio(data)
         }
 
         audioRecorder.onAudioLevel = { [weak self] level in
@@ -554,6 +925,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Debug.log("startRecording() SKIPPED - already recording")
             return
         }
+        guard !isRetranscribing else {
+            Debug.log("startRecording() SKIPPED - re-transcribe in progress")
+            return
+        }
 
         guard hasAPIKeyForCurrentProvider() else {
             Debug.log("startRecording() SKIPPED - no API key for \(SettingsStore.shared.sttProvider)")
@@ -571,6 +946,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sessionDiscarded = false
         statusItem.button?.image = recordingIcon
         accumulatedText = ""
+        lastInterimText = ""
+        sessionAudioPCM = Data()
+        sessionPastedText = ""
+        sessionSampleRate = SettingsStore.shared.sttProvider.audioSampleRate
         rebuildMenu()
 
         FeedbackSoundPlayer.playStart()
@@ -578,6 +957,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let appName = frontApp?.localizedName ?? ""
         let appIcon = frontApp?.icon
+        sessionAppName = appName
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
 
         syncAudioSampleRate()
@@ -623,6 +1003,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sessionDiscarded = true
         isRecording = false
         accumulatedText = ""
+        lastInterimText = ""
+        sessionAudioPCM = Data()
+        sessionPastedText = ""
         statusItem.button?.image = normalIcon
         rebuildMenu()
 

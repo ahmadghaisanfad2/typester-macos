@@ -11,7 +11,7 @@ class SubtitleViewModel: ObservableObject {
     @Published var maxCapsuleWidth: CGFloat = 600
     /// Recent normalized mic levels (oldest → newest), used by WaveformIcon.
     @Published var audioLevels: [CGFloat] = Array(repeating: 0.08, count: 5)
-    /// When false, hide live transcript text; waveform still shows.
+    /// When false, hide live transcript text; app name and waveform still show.
     @Published var showStreamPreview: Bool = true
 
     var displayText: String {
@@ -102,31 +102,28 @@ struct SubtitleView: View {
 
             WaveformIcon(viewModel: viewModel)
 
-            if viewModel.showStreamPreview {
-                if viewModel.displayText.isEmpty {
-                    if !viewModel.targetAppName.isEmpty {
-                        Text(viewModel.targetAppName)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.7))
+            if viewModel.showStreamPreview, !viewModel.displayText.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(viewModel.displayText)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                            .fixedSize()
+                            .id("text")
                     }
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(viewModel.displayText)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white)
-                                .fixedSize()
-                                .id("text")
-                        }
-                        .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
-                        .onChange(of: viewModel.displayText) { _ in
-                            proxy.scrollTo("text", anchor: .trailing)
-                        }
-                        .onAppear {
-                            proxy.scrollTo("text", anchor: .trailing)
-                        }
+                    .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
+                    .onChange(of: viewModel.displayText) { _ in
+                        proxy.scrollTo("text", anchor: .trailing)
+                    }
+                    .onAppear {
+                        proxy.scrollTo("text", anchor: .trailing)
                     }
                 }
+            } else if !viewModel.targetAppName.isEmpty {
+                // Always show the active app name when preview is off or text has not arrived yet.
+                Text(viewModel.targetAppName)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.7))
             }
         }
         .frame(minHeight: 20)

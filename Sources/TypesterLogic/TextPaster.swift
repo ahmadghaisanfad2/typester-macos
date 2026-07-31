@@ -5,6 +5,10 @@ import ApplicationServices
 public class TextPaster {
     public init() {}
 
+    /// Optional hook invoked around synthetic ⌘V so press-to-speak monitors can ignore it.
+    public var onPasteSimulationBegin: (() -> Void)?
+    public var onPasteSimulationEnd: (() -> Void)?
+
     // MARK: - Accessibility
 
     public static func checkAccessibilityPermission() -> Bool {
@@ -36,21 +40,75 @@ public class TextPaster {
 
     // MARK: - Paste
 
-    public func paste(_ text: String) {
-        guard !text.isEmpty else { return }
+    /// Pastes text into the focused field. Returns false if accessibility is missing or text is empty.
+    @discardableResult
+    public func paste(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
 
         guard TextPaster.checkAccessibilityPermission() else {
             TextPaster.requestAccessibilityPermission()
-            return
+            return false
+        }
+
+        // Prefer AX insert when possible (avoids ⌘V races with press-to-speak Command).
+        if insertTextViaAccessibility(text) {
+            return true
         }
 
         let pasteboard = NSPasteboard.general
+        let previousItems = pasteboard.pasteboardItems?.compactMap { item -> [NSPasteboard.PasteboardType: Data]? in
+            var dict: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    dict[type] = data
+                }
+            }
+            return dict.isEmpty ? nil : dict
+        }
+
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        onPasteSimulationBegin?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
             self.simulatePaste()
+            self.onPasteSimulationEnd?()
+
+            // Restore previous clipboard after the target app has had time to read ours.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard let previousItems, !previousItems.isEmpty else { return }
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                for itemDict in previousItems {
+                    let item = NSPasteboardItem()
+                    for (type, data) in itemDict {
+                        item.setData(data, forType: type)
+                    }
+                    pb.writeObjects([item])
+                }
+            }
         }
+        return true
+    }
+
+    private func insertTextViaAccessibility(_ text: String) -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef else {
+            return false
+        }
+
+        let element = focused as! AXUIElement
+
+        var isSettable: DarwinBoolean = false
+        guard AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &isSettable) == .success,
+              isSettable.boolValue else {
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
     }
 
     private func simulatePaste() {
@@ -64,7 +122,8 @@ public class TextPaster {
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
 
-        keyDown.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp.post(tap: .cgAnnotatedSessionEventTap)
+        // Prefer HID tap; fall back to annotated session if needed.
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
     }
 }
