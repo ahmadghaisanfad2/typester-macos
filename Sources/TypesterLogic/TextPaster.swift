@@ -50,8 +50,8 @@ public class TextPaster {
             return false
         }
 
-        // Prefer AX insert when possible (avoids ⌘V races with press-to-speak Command).
-        if insertTextViaAccessibility(text) {
+        // Electron/Cursor often reports AX success without inserting — skip AX there.
+        if !prefersCommandVPaste(), insertTextViaAccessibility(text) {
             return true
         }
 
@@ -75,8 +75,8 @@ public class TextPaster {
             self.simulatePaste()
             self.onPasteSimulationEnd?()
 
-            // Restore previous clipboard after the target app has had time to read ours.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            // Electron (Cursor) needs a longer window than native AppKit fields.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 guard let previousItems, !previousItems.isEmpty else { return }
                 let pb = NSPasteboard.general
                 pb.clearContents()
@@ -108,7 +108,20 @@ public class TextPaster {
             return false
         }
 
-        return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+        guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
+            return false
+        }
+
+        // Verify — Electron/Cursor can return success without changing the field.
+        let needle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef) == .success,
+              let value = valueRef as? String,
+              !needle.isEmpty,
+              value.contains(needle) else {
+            return false
+        }
+        return true
     }
 
     private func simulatePaste() {
@@ -122,8 +135,19 @@ public class TextPaster {
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
 
-        // Prefer HID tap; fall back to annotated session if needed.
+        // Post exactly once — multiple taps caused triple paste in Cursor.
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+    }
+
+    /// Electron/Chromium hosts often lie about AX text insertion.
+    private func prefersCommandVPaste() -> Bool {
+        guard let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.lowercased() else {
+            return false
+        }
+        return bundle.hasPrefix("com.todesktop.")
+            || bundle.contains("electron")
+            || bundle.hasPrefix("com.microsoft.vscode")
+            || bundle.hasPrefix("com.github.atom")
     }
 }
