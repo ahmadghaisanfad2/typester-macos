@@ -1,21 +1,27 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build a local DMG and publish it as a GitHub Release on this fork.
+# Build a local DMG and publish it as a GitHub Release.
 # Does not use GitHub Actions (useful when Actions minutes are exhausted).
+# Uses githubOwner/githubRepo from Models.swift so origin+upstream remotes don't confuse `gh`.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
-VERSION="$(python3 - <<'PY'
+eval "$(python3 - <<'PY'
 import re
 from pathlib import Path
 text = Path("Sources/TypesterLogic/Models.swift").read_text()
-match = re.search(r'appVersion\s*=\s*"([^"]+)"', text)
-if not match:
+version = re.search(r'appVersion\s*=\s*"([^"]+)"', text)
+owner = re.search(r'githubOwner\s*=\s*"([^"]+)"', text)
+repo = re.search(r'githubRepo\s*=\s*"([^"]+)"', text)
+if not version:
     raise SystemExit("Could not find appVersion in Models.swift")
-print(match.group(1))
+if not owner or not repo:
+    raise SystemExit("Could not find githubOwner/githubRepo in Models.swift")
+print(f'VERSION="{version.group(1)}"')
+print(f'GH_REPO="{owner.group(1)}/{repo.group(1)}"')
 PY
 )"
 
@@ -28,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Publishing Typester ${VERSION} (${TAG})"
+echo "==> Publishing Typester ${VERSION} (${TAG}) to ${GH_REPO}"
 
 # Keep build-release.sh VERSION in sync
 if grep -q '^VERSION=' "$SCRIPT_DIR/build-release.sh"; then
@@ -60,19 +66,20 @@ Local release built with \`scripts/build-release.sh\` and published with \`scrip
 3. If Gatekeeper blocks an unsigned build: Right-click → Open
 EOF
 
-if gh release view "$TAG" >/dev/null 2>&1; then
+if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
     echo "==> Release ${TAG} already exists — uploading/replacing DMG asset..."
-    gh release upload "$TAG" "$DMG_PATH" --clobber
+    gh release upload "$TAG" "$DMG_PATH" --repo "$GH_REPO" --clobber
 else
     echo "==> Creating GitHub release ${TAG}..."
     gh release create "$TAG" "$DMG_PATH" \
+        --repo "$GH_REPO" \
         --title "Typester ${VERSION}" \
         --notes-file "$NOTES_FILE"
 fi
 
 echo ""
 echo "==> Published ${TAG}"
-echo "    Release page: $(gh release view "$TAG" --json url -q .url)"
+echo "    Release page: $(gh release view "$TAG" --repo "$GH_REPO" --json url -q .url)"
 echo "    Asset: $DMG_PATH"
 echo ""
-echo "Users on your fork build can use Settings → Check for Updates."
+echo "Logged-in users can download from the release page. Check for Updates needs a public repo (or auth)."
