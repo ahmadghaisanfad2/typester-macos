@@ -166,16 +166,24 @@ final class ModelsTests: XCTestCase {
     func testSTTProviderTypeRawValues() {
         XCTAssertEqual(STTProviderType.soniox.rawValue, "soniox")
         XCTAssertEqual(STTProviderType.deepgram.rawValue, "deepgram")
+        XCTAssertEqual(STTProviderType.openai.rawValue, "openai")
     }
 
     func testSTTProviderTypeDisplayName() {
         XCTAssertEqual(STTProviderType.soniox.displayName, "Soniox")
         XCTAssertEqual(STTProviderType.deepgram.displayName, "Deepgram")
+        XCTAssertEqual(STTProviderType.openai.displayName, "OpenAI")
     }
 
     func testSTTProviderTypeModelID() {
         XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
+    }
+
+    func testSTTProviderTypeAudioSampleRate() {
+        XCTAssertEqual(STTProviderType.soniox.audioSampleRate, 16_000)
+        XCTAssertEqual(STTProviderType.deepgram.audioSampleRate, 16_000)
+        XCTAssertEqual(STTProviderType.openai.audioSampleRate, 24_000)
     }
 
     func testSTTProviderTypeCodable() throws {
@@ -189,8 +197,27 @@ final class ModelsTests: XCTestCase {
 
     func testSTTProviderTypeAllCases() {
         let allCases = STTProviderType.allCases
-        XCTAssertEqual(allCases.count, 2)
+        XCTAssertEqual(allCases.count, 3)
         XCTAssertTrue(allCases.contains(.soniox))
         XCTAssertTrue(allCases.contains(.deepgram))
+        XCTAssertTrue(allCases.contains(.openai))
+    }
+
+    // MARK: - OpenAITranscribeModel tests
+
+    func testOpenAITranscribeModelRawValues() {
+        XCTAssertEqual(OpenAITranscribeModel.gptLiveTranscribe.rawValue, "gpt-live-transcribe")
+        XCTAssertEqual(OpenAITranscribeModel.gptTranscribe.rawValue, "gpt-transcribe")
+        XCTAssertEqual(OpenAITranscribeModel.gpt4oTranscribe.rawValue, "gpt-4o-transcribe")
+        XCTAssertEqual(OpenAITranscribeModel.gpt4oMiniTranscribe.rawValue, "gpt-4o-mini-transcribe")
+    }
+
+    func testOpenAITranscribeModelAllCases() {
+        XCTAssertEqual(OpenAITranscribeModel.allCases.count, 4)
+    }
+
+    func testOpenAITranscribeModelSupportsDelay() {
+        XCTAssertTrue(OpenAITranscribeModel.gptLiveTranscribe.supportsDelay)
+        XCTAssertFalse(OpenAITranscribeModel.gptTranscribe.supportsDelay)
     }
 }

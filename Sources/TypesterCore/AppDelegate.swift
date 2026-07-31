@@ -22,10 +22,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return SonioxClient()
         case .deepgram:
             return DeepgramClient()
+        case .openai:
+            return OpenAIClient()
         }
     }
 
     private var isRecording = false
+    private var sessionDiscarded = false
     private var accumulatedText = ""
     private var normalIcon: NSImage?
     private var recordingIcon: NSImage?
@@ -53,11 +56,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             object: nil
         )
 
-        // Show onboarding if not set up, otherwise start monitoring
-        if SettingsStore.shared.apiKey == nil {
+        // Show onboarding if selected provider has no API key
+        if !hasAPIKeyForCurrentProvider() {
             showOnboarding()
         } else {
             updateMonitoringMode()
+        }
+    }
+
+    private func hasAPIKeyForCurrentProvider() -> Bool {
+        switch SettingsStore.shared.sttProvider {
+        case .soniox:
+            return SettingsStore.shared.apiKey != nil
+        case .deepgram:
+            return SettingsStore.shared.deepgramApiKey != nil
+        case .openai:
+            return SettingsStore.shared.openaiApiKey != nil
         }
     }
 
@@ -74,6 +88,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if sttProvider is SonioxClient { return }
         case .deepgram:
             if sttProvider is DeepgramClient { return }
+        case .openai:
+            if sttProvider is OpenAIClient { return }
         }
 
         // Disconnect old provider
@@ -82,6 +98,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Setup new provider with same callbacks
         sttProvider = createSTTProvider()
         setupSTTCallbacks()
+        syncAudioSampleRate()
+    }
+
+    private func syncAudioSampleRate() {
+        audioRecorder.targetSampleRate = SettingsStore.shared.sttProvider.audioSampleRate
     }
 
     private func setupSTTCallbacks() {
@@ -121,6 +142,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onFinalized = { [weak self] in
             guard let self = self else { return }
+            if self.sessionDiscarded {
+                self.sessionDiscarded = false
+                self.subtitleOverlay.hide()
+                self.sttProvider.disconnect()
+                return
+            }
             self.pasteAccumulatedTranscript()
             self.subtitleOverlay.hide()
             self.sttProvider.disconnect()
@@ -251,8 +278,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         micMenuItem.submenu = micMenu
         menu.addItem(micMenuItem)
 
-        // Languages submenu (only for Soniox - Deepgram uses auto-detect)
-        if SettingsStore.shared.sttProvider == .soniox {
+        // Languages submenu (Soniox hints / OpenAI languages; Deepgram auto-detects)
+        if SettingsStore.shared.sttProvider == .soniox || SettingsStore.shared.sttProvider == .openai {
             let langMenu = NSMenu()
             let selectedLangs = Set(SettingsStore.shared.languageHints)
 
@@ -319,7 +346,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !text.isEmpty else { return }
         lastTranscript = text
         let replaced = SettingsStore.shared.applyReplacements(text)
-        textPaster.paste(replaced + " ")
+        let formatted = TranscriptFormatter.format(replaced)
+        textPaster.paste(formatted + " ")
         accumulatedText = ""
         rebuildMenu()
     }
@@ -438,6 +466,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HotkeyManager.shared.onHotkeyTriggered = { [weak self] in
             self?.toggleRecording()
         }
+        HotkeyManager.shared.onEscapePressed = { [weak self] in
+            self?.cancelRecording()
+        }
         HotkeyManager.shared.registerHotkey()
     }
 
@@ -468,6 +499,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Audio pipeline
 
     private func setupAudioPipeline() {
+        syncAudioSampleRate()
+
         audioRecorder.onAudioBuffer = { [weak self] data in
             self?.sttProvider.sendAudio(data)
         }
@@ -476,7 +509,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.subtitleOverlay.updateAudioLevel(level)
         }
 
-        audioRecorder.onError = { [weak self] error in
+        audioRecorder.onError = { [weak self] _ in
             self?.stopRecording()
         }
 
@@ -522,15 +555,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
 
-        let hasApiKey: Bool
-        switch SettingsStore.shared.sttProvider {
-        case .soniox:
-            hasApiKey = SettingsStore.shared.apiKey != nil
-        case .deepgram:
-            hasApiKey = SettingsStore.shared.deepgramApiKey != nil
-        }
-
-        guard hasApiKey else {
+        guard hasAPIKeyForCurrentProvider() else {
             Debug.log("startRecording() SKIPPED - no API key for \(SettingsStore.shared.sttProvider)")
             openSettings()
             return
@@ -543,6 +568,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pendingFinalizeWorkItem = nil
 
         isRecording = true
+        sessionDiscarded = false
         statusItem.button?.image = recordingIcon
         accumulatedText = ""
         rebuildMenu()
@@ -554,6 +580,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appIcon = frontApp?.icon
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
 
+        syncAudioSampleRate()
         // Start audio immediately - it will buffer while WebSocket connects
         audioRecorder.startRecording()
         sttProvider.connect()
@@ -568,6 +595,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         Debug.log("Stopping recording...")
         isRecording = false
+        sessionDiscarded = false
         statusItem.button?.image = normalIcon
         rebuildMenu()
 
@@ -582,6 +610,27 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         pendingFinalizeWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+    }
+
+    /// Discard the current dictation without pasting (ESC).
+    private func cancelRecording() {
+        Debug.log("cancelRecording() called, isRecording=\(isRecording)")
+        guard isRecording else { return }
+
+        pendingFinalizeWorkItem?.cancel()
+        pendingFinalizeWorkItem = nil
+
+        sessionDiscarded = true
+        isRecording = false
+        accumulatedText = ""
+        statusItem.button?.image = normalIcon
+        rebuildMenu()
+
+        FeedbackSoundPlayer.playStop()
+        audioRecorder.stopRecording()
+        subtitleOverlay.hide()
+        sttProvider.disconnect()
+        sessionDiscarded = false
     }
 
     // MARK: - Shortcut display

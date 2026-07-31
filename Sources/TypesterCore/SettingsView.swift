@@ -8,8 +8,10 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @State private var sonioxKeyInput: String = ""
     @State private var deepgramKeyInput: String = ""
+    @State private var openaiKeyInput: String = ""
     @State private var showSonioxKey = false
     @State private var showDeepgramKey = false
+    @State private var showOpenAIKey = false
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var showingAddTerm = false
@@ -30,10 +32,22 @@ struct SettingsView: View {
                         }
                     }
 
-                    LabeledContent("Model") {
-                        Text(settings.sttProvider.modelID)
+                    if settings.sttProvider == .openai {
+                        Picker("Model", selection: $settings.openaiModel) {
+                            ForEach(OpenAITranscribeModel.allCases) { model in
+                                Text(model.displayName).tag(model)
+                            }
+                        }
+                        Text(settings.openaiModel.rawValue)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                    } else {
+                        LabeledContent("Model") {
+                            Text(settings.sttProvider.modelID)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
 
@@ -53,7 +67,7 @@ struct SettingsView: View {
                                 .font(.caption)
                         }
                     }
-                } else {
+                } else if settings.sttProvider == .deepgram {
                     Section {
                         apiKeyField(
                             key: $deepgramKeyInput,
@@ -66,6 +80,22 @@ struct SettingsView: View {
                             Text("Deepgram API key")
                             Spacer()
                             Link("Get key", destination: URL(string: "https://console.deepgram.com")!)
+                                .font(.caption)
+                        }
+                    }
+                } else {
+                    Section {
+                        apiKeyField(
+                            key: $openaiKeyInput,
+                            showKey: $showOpenAIKey,
+                            savedKey: settings.openaiApiKey,
+                            onSave: { settings.openaiApiKey = $0 }
+                        )
+                    } header: {
+                        HStack {
+                            Text("OpenAI API key")
+                            Spacer()
+                            Link("Get key", destination: URL(string: "https://platform.openai.com/api-keys")!)
                                 .font(.caption)
                         }
                     }
@@ -111,14 +141,16 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if settings.sttProvider == .soniox {
+                if settings.sttProvider == .soniox || settings.sttProvider == .openai {
                     Section {
                         TextField("Domain", text: $settings.contextDomain, prompt: Text("e.g. Healthcare, Software"))
                         TextField("Topic", text: $settings.contextTopic, prompt: Text("e.g. Product standup"))
                     } header: {
                         Text("Context")
                     } footer: {
-                        Text("Optional domain and topic help Soniox bias recognition toward your subject matter.")
+                        Text(settings.sttProvider == .openai
+                             ? "Optional domain and topic are sent as transcription context to OpenAI."
+                             : "Optional domain and topic help Soniox bias recognition toward your subject matter.")
                             .foregroundStyle(.secondary)
                     }
 
@@ -179,7 +211,9 @@ struct SettingsView: View {
                         } header: {
                             Text("Corrections")
                         } footer: {
-                            Text("Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox.")
+                            Text(settings.sttProvider == .openai
+                                 ? "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent as OpenAI keywords."
+                                 : "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox.")
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -298,6 +332,9 @@ struct SettingsView: View {
             }
             if let key = settings.deepgramApiKey {
                 deepgramKeyInput = key
+            }
+            if let key = settings.openaiApiKey {
+                openaiKeyInput = key
             }
             checkPermissions()
             settings.syncLaunchAtLoginStatus()

@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/nickustinov/typester-macos/actions/workflows/tests.yml/badge.svg)](https://github.com/nickustinov/typester-macos/actions/workflows/tests.yml)
 
-A lightweight macOS menu bar app for speech-to-text dictation using [Soniox](https://soniox.com) or [Deepgram](https://deepgram.com).
+A lightweight macOS menu bar app for speech-to-text dictation using [Soniox](https://soniox.com), [Deepgram](https://deepgram.com), or [OpenAI](https://platform.openai.com).
 
 ![Demo](Assets/demo.gif)
 
@@ -13,15 +13,17 @@ Typester lives in your menu bar and lets you dictate text directly into any appl
 **Bring Your Own Key (BYOK)** — Typester connects directly to your chosen speech-to-text provider using your own API key. No middleman, no subscription, no data collection. You pay only for what you use directly to the provider.
 
 Features:
-- **Multiple providers** — Choose between Soniox or Deepgram for speech recognition
+- **Multiple providers** — Choose Soniox, Deepgram, or OpenAI for speech recognition
 - **Press-to-speak** — Hold a key to dictate, release to paste (default mode, configurable: Fn, Left/Right ⌘, Left/Right ⌥)
 - **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or custom shortcut)
-- **Real-time transcription** — Uses streaming APIs for low-latency speech recognition (Soniox `stt-rt-v5`)
-- **Multilingual** — Soniox: 60+ languages with hints; Deepgram: auto-detects with multilingual model
+- **Cancel with Esc** — Press Escape while dictating to discard the transcript without pasting
+- **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models)
+- **OpenAI model picker** — Select `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`
+- **Multilingual** — Soniox/OpenAI: language hints; Deepgram: auto-detects with multilingual model
 - **Microphone selection** — Choose your preferred input device from the menu
-- **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox)
-- **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed Soniox terms
-- **Domain / topic context** — Optional Soniox context fields in Settings for better domain bias
+- **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox context / OpenAI keywords)
+- **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed provider hints
+- **Domain / topic context** — Optional context fields in Settings for better domain bias
 - **Check for Updates** — Compare against your fork’s GitHub Releases and download the latest DMG
 - **Auto-paste** — Transcribed text is automatically pasted into the active application
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
@@ -30,7 +32,7 @@ Features:
 ## Requirements
 
 - macOS 13 or later
-- API key from [Soniox](https://soniox.com) or [Deepgram](https://console.deepgram.com)
+- API key from [Soniox](https://soniox.com), [Deepgram](https://console.deepgram.com), or [OpenAI](https://platform.openai.com/api-keys)
 
 ## Permissions
 
@@ -60,7 +62,9 @@ Typester requires two macOS permissions:
 2. Speak — your words appear in the active text field
 3. Press the hotkey again to stop
 
-You can switch between modes in Settings. Use the menu bar to select your microphone, preferred languages (Soniox only), teach corrections from the last transcript, or access settings.
+**Cancel:** Press **Esc** while dictating to discard the current transcript without pasting.
+
+You can switch between modes in Settings. Use the menu bar to select your microphone, preferred languages (Soniox/OpenAI), teach corrections from the last transcript, or access settings.
 
 ## Building from source
 
@@ -114,6 +118,7 @@ defaults delete com.typester.app
 # Remove API keys from keychain
 security delete-generic-password -s "com.typester.api" -a "soniox-api-key"
 security delete-generic-password -s "com.typester.api" -a "deepgram-api-key"
+security delete-generic-password -s "com.typester.api" -a "openai-api-key"
 ```
 
 ## Architecture
@@ -132,6 +137,8 @@ Sources/
 │   ├── STTClientBase.swift         # Base class for STT WebSocket clients
 │   ├── SonioxClient.swift          # Soniox WebSocket streaming (stt-rt-v5)
 │   ├── DeepgramClient.swift        # Deepgram WebSocket streaming
+│   ├── OpenAIClient.swift          # OpenAI Realtime transcription
+│   ├── TranscriptFormatter.swift   # Local punctuation / capitalization cleanup
 │   ├── TextPaster.swift            # Clipboard + simulated Cmd+V paste
 │   ├── UpdateChecker.swift         # GitHub Releases update check + DMG download
 │   ├── KeyboardUtils.swift         # Key code to string conversion
@@ -150,6 +157,7 @@ Tests/
 ├── KeyboardUtilsTests.swift        # Keyboard utility tests
 ├── DictionaryHelpersTests.swift    # Correction / context helper tests
 ├── UpdateCheckerTests.swift        # Version compare + release parsing tests
+├── TranscriptFormatterTests.swift  # Local transcript formatting tests
 └── STTResponseParsingTests.swift   # STT response parsing tests
 ```
 
@@ -164,7 +172,7 @@ swift build --build-system native --product dictionary-smoke
 Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-14`).
 ## Disclaimer
 
-This project is not affiliated with, endorsed by, or sponsored by Soniox or Deepgram. These are third-party services used for speech recognition.
+This project is not affiliated with, endorsed by, or sponsored by Soniox, Deepgram, or OpenAI. These are third-party services used for speech recognition.
 
 ## License
 

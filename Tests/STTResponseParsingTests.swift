@@ -316,4 +316,85 @@ final class STTResponseParsingTests: XCTestCase {
             XCTFail("Expected transcript result")
         }
     }
+
+    // MARK: - OpenAI response parsing
+
+    func testOpenAIDelta() {
+        let config = OpenAIConnectionConfig()
+        let json: [String: Any] = [
+            "type": "conversation.item.input_audio_transcription.delta",
+            "delta": "Hello"
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .transcript(let text, let isFinal) = results[0] {
+            XCTAssertEqual(text, "Hello")
+            XCTAssertFalse(isFinal)
+        } else {
+            XCTFail("Expected interim transcript")
+        }
+    }
+
+    func testOpenAICompleted() {
+        let config = OpenAIConnectionConfig()
+        let json: [String: Any] = [
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "Hello, how are you?"
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .transcript(let text, let isFinal) = results[0] {
+            XCTAssertEqual(text, "Hello, how are you?")
+            XCTAssertTrue(isFinal)
+        } else {
+            XCTFail("Expected final transcript")
+        }
+    }
+
+    func testOpenAIError() {
+        let config = OpenAIConnectionConfig()
+        let json: [String: Any] = [
+            "type": "error",
+            "error": [
+                "message": "Invalid API key"
+            ]
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .error(let message) = results[0] {
+            XCTAssertEqual(message, "Invalid API key")
+        } else {
+            XCTFail("Expected error result")
+        }
+    }
+
+    func testOpenAISessionUpdatePayloadLiveModel() {
+        let payload = OpenAIConnectionConfig.makeSessionUpdatePayload(
+            model: .gptLiveTranscribe,
+            pasteOnPause: false,
+            languageHints: ["en", "fr"],
+            domain: "Software",
+            topic: "Standup",
+            keywords: ["Typester", "API"]
+        )
+
+        XCTAssertEqual(payload["type"] as? String, "session.update")
+        let session = payload["session"] as? [String: Any]
+        XCTAssertEqual(session?["type"] as? String, "transcription")
+        let audio = session?["audio"] as? [String: Any]
+        let input = audio?["input"] as? [String: Any]
+        let transcription = input?["transcription"] as? [String: Any]
+        XCTAssertEqual(transcription?["model"] as? String, "gpt-live-transcribe")
+        XCTAssertEqual(transcription?["delay"] as? String, "medium")
+        XCTAssertEqual(transcription?["languages"] as? [String], ["en", "fr"])
+        XCTAssertEqual(transcription?["keywords"] as? [String], ["Typester", "API"])
+        XCTAssertTrue((transcription?["prompt"] as? String)?.contains("Software") == true)
+        XCTAssertTrue(input?["turn_detection"] is NSNull)
+    }
 }

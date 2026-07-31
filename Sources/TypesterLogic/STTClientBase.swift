@@ -129,10 +129,16 @@ public class STTClientBase: NSObject, STTProvider {
 
     public func sendAudio(_ data: Data) {
         if connectionReady {
-            webSocketTask?.send(.data(data)) { _ in }
+            transmitAudio(data)
         } else {
             audioBuffer.append(data)
         }
+    }
+
+    /// Sends one audio chunk on the wire. Default: raw binary data frame.
+    /// OpenAI overrides this to wrap PCM in base64 JSON events.
+    func transmitAudio(_ data: Data) {
+        webSocketTask?.send(.data(data)) { _ in }
     }
 
     public func sendFinalize() {
@@ -164,7 +170,7 @@ public class STTClientBase: NSObject, STTProvider {
         Debug.log("Connected in \(String(format: "%.2f", elapsed))s, flushing \(audioBuffer.count) buffered chunks")
 
         for chunk in audioBuffer {
-            webSocketTask?.send(.data(chunk)) { _ in }
+            transmitAudio(chunk)
         }
         audioBuffer.removeAll()
         onConnected?()
@@ -200,7 +206,7 @@ public class STTClientBase: NSObject, STTProvider {
                 DispatchQueue.main.async {
                     // Ignore messages from a stale socket
                     guard self.webSocketTask === currentTask else { return }
-                    self.handleMessage(message)
+                    self.handleWebSocketMessage(message)
                 }
                 self.receiveMessage()
 
@@ -219,7 +225,8 @@ public class STTClientBase: NSObject, STTProvider {
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+    /// Parses a WebSocket message into JSON and routes STT results.
+    func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
         let text: String?
         switch message {
         case .string(let str):
@@ -238,7 +245,11 @@ public class STTClientBase: NSObject, STTProvider {
 
         let config = makeConnectionConfig()
         let results = config.parseResponse(json)
+        routeParseResults(results)
+    }
 
+    /// Routes parsed STT results to provider callbacks. Subclasses may override.
+    func routeParseResults(_ results: [STTParseResult]) {
         // Batch tokens from this response: Soniox re-sends all tokens each
         // response, so we concatenate them into single final/interim callbacks.
         var finalBatch = ""

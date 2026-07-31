@@ -83,6 +83,13 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var openaiModel: OpenAITranscribeModel = .gptLiveTranscribe {
+        didSet {
+            UserDefaults.standard.set(openaiModel.rawValue, forKey: openaiModelKey)
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     @Published public var showStreamPreview: Bool = true {
         didSet {
             UserDefaults.standard.set(showStreamPreview, forKey: showStreamPreviewKey)
@@ -105,6 +112,7 @@ public class SettingsStore: ObservableObject {
 
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
+    private let openaiModelKey = "openaiModel"
     private let activationModeKey = "activationMode"
     private let pressToSpeakKeyKey = "pressToSpeakKey"
     private let languageHintsKey = "languageHints"
@@ -120,6 +128,7 @@ public class SettingsStore: ObservableObject {
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
+    private let openaiKeychainAccount = "openai-api-key"
 
     private init() {
         loadShortcutKeys()
@@ -132,6 +141,7 @@ public class SettingsStore: ObservableObject {
         loadContextDomain()
         loadContextTopic()
         loadSTTProvider()
+        loadOpenAIModel()
         loadFeedbackPreferences()
         syncLaunchAtLoginStatus()
     }
@@ -296,6 +306,14 @@ public class SettingsStore: ObservableObject {
         UserDefaults.standard.set(sttProvider.rawValue, forKey: sttProviderKey)
     }
 
+    private func loadOpenAIModel() {
+        guard let rawValue = UserDefaults.standard.string(forKey: openaiModelKey),
+              let model = OpenAITranscribeModel(rawValue: rawValue) else {
+            return
+        }
+        openaiModel = model
+    }
+
     private func loadFeedbackPreferences() {
         if UserDefaults.standard.object(forKey: showStreamPreviewKey) != nil {
             showStreamPreview = UserDefaults.standard.bool(forKey: showStreamPreviewKey)
@@ -334,6 +352,19 @@ public class SettingsStore: ObservableObject {
                 setKeychainItem(value, account: deepgramKeychainAccount)
             } else {
                 deleteKeychainItem(account: deepgramKeychainAccount)
+            }
+            objectWillChange.send()
+        }
+    }
+
+    // OpenAI API key
+    public var openaiApiKey: String? {
+        get { getKeychainItem(account: openaiKeychainAccount) }
+        set {
+            if let value = newValue {
+                setKeychainItem(value, account: openaiKeychainAccount)
+            } else {
+                deleteKeychainItem(account: openaiKeychainAccount)
             }
             objectWillChange.send()
         }

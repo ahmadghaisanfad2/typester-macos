@@ -8,6 +8,9 @@ public class AudioRecorder {
     private var isRecording = false
     private var lastLevelEmit: CFAbsoluteTime = 0
 
+    /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram, 24 kHz OpenAI).
+    public var targetSampleRate: Double = 16_000
+
     // MARK: - Callbacks
 
     public var onAudioBuffer: ((Data) -> Void)?
@@ -103,10 +106,11 @@ public class AudioRecorder {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
-        // Target format: 16kHz mono PCM (Soniox requirement)
+        let sampleRate = targetSampleRate
+        // Target format: mono PCM Int16 at the provider's required rate
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 16000,
+            sampleRate: sampleRate,
             channels: 1,
             interleaved: true
         ) else {
@@ -120,7 +124,7 @@ public class AudioRecorder {
         }
 
         let inputBufferSize: AVAudioFrameCount = 4096
-        let outputBufferSize = AVAudioFrameCount(Double(inputBufferSize) * (16000.0 / inputFormat.sampleRate))
+        let outputBufferSize = AVAudioFrameCount(Double(inputBufferSize) * (sampleRate / inputFormat.sampleRate))
 
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
