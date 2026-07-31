@@ -284,6 +284,13 @@ struct OnboardingView: View {
                     }
                 }
                 .labelsHidden()
+            } else if settings.sttProvider == .soniox {
+                Picker("Mode", selection: $settings.sonioxMode) {
+                    ForEach(SonioxTranscribeMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
             }
         }
     }

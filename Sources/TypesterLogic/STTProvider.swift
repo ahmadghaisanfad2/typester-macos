@@ -13,10 +13,10 @@ public enum STTProviderType: String, Codable, CaseIterable {
         }
     }
 
-    /// Model ID sent to the provider API (or selected OpenAI model).
+    /// Model ID sent to the provider API (or selected OpenAI / Soniox model).
     public var modelID: String {
         switch self {
-        case .soniox: return "stt-rt-v5"
+        case .soniox: return SettingsStore.shared.sonioxMode.modelID
         case .deepgram: return "nova-3"
         case .openai: return SettingsStore.shared.openaiModel.rawValue
         }
@@ -27,6 +27,28 @@ public enum STTProviderType: String, Codable, CaseIterable {
         switch self {
         case .soniox, .deepgram: return 16_000
         case .openai: return 24_000
+        }
+    }
+}
+
+/// Selectable Soniox transcription modes (real-time WebSocket vs async HTTP).
+public enum SonioxTranscribeMode: String, Codable, CaseIterable, Identifiable {
+    case realtime = "realtime"
+    case async = "async"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .realtime: return "Real-time"
+        case .async: return "Async"
+        }
+    }
+
+    public var modelID: String {
+        switch self {
+        case .realtime: return "stt-rt-v5"
+        case .async: return "stt-async-v5"
         }
     }
 }

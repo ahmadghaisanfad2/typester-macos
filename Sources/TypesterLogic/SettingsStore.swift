@@ -90,6 +90,13 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var sonioxMode: SonioxTranscribeMode = .realtime {
+        didSet {
+            UserDefaults.standard.set(sonioxMode.rawValue, forKey: sonioxModeKey)
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     @Published public var showStreamPreview: Bool = true {
         didSet {
             UserDefaults.standard.set(showStreamPreview, forKey: showStreamPreviewKey)
@@ -113,6 +120,7 @@ public class SettingsStore: ObservableObject {
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
+    private let sonioxModeKey = "sonioxMode"
     private let activationModeKey = "activationMode"
     private let pressToSpeakKeyKey = "pressToSpeakKey"
     private let languageHintsKey = "languageHints"
@@ -142,6 +150,7 @@ public class SettingsStore: ObservableObject {
         loadContextTopic()
         loadSTTProvider()
         loadOpenAIModel()
+        loadSonioxMode()
         loadFeedbackPreferences()
         syncLaunchAtLoginStatus()
     }
@@ -312,6 +321,14 @@ public class SettingsStore: ObservableObject {
             return
         }
         openaiModel = model
+    }
+
+    private func loadSonioxMode() {
+        guard let rawValue = UserDefaults.standard.string(forKey: sonioxModeKey),
+              let mode = SonioxTranscribeMode(rawValue: rawValue) else {
+            return
+        }
+        sonioxMode = mode
     }
 
     private func loadFeedbackPreferences() {

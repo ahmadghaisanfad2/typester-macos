@@ -20,7 +20,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func createSTTProvider() -> STTProvider {
         switch SettingsStore.shared.sttProvider {
         case .soniox:
-            return SonioxClient()
+            switch SettingsStore.shared.sonioxMode {
+            case .realtime:
+                return SonioxClient()
+            case .async:
+                return SonioxAsyncClient()
+            }
         case .deepgram:
             return DeepgramClient()
         case .openai:
@@ -109,7 +114,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func updateSTTProvider() {
         switch SettingsStore.shared.sttProvider {
         case .soniox:
-            if sttProvider is SonioxClient { return }
+            switch SettingsStore.shared.sonioxMode {
+            case .realtime:
+                if sttProvider is SonioxClient { return }
+            case .async:
+                if sttProvider is SonioxAsyncClient { return }
+            }
         case .deepgram:
             if sttProvider is DeepgramClient { return }
         case .openai:
@@ -646,10 +656,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         lastInterimText = ""
         rebuildMenu()
 
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        subtitleOverlay.show(
+            appName: frontApp?.localizedName ?? "Re-transcribe",
+            appIcon: frontApp?.icon
+        )
+        subtitleOverlay.showProcessing()
+
         sttProvider.connect()
     }
 
     private func replayPCM(_ pcm: Data, sampleRate: Double) {
+        // Async Soniox uploads one buffer — skip chunked realtime replay.
+        if sttProvider is SonioxAsyncClient {
+            sttProvider.sendAudio(pcm)
+            sttProvider.sendFinalize()
+            return
+        }
+
         let bytesPerSecond = Int(sampleRate) * MemoryLayout<Int16>.size
         let chunkSize = max(bytesPerSecond / 10, MemoryLayout<Int16>.size * 2) // ~100ms
         var offset = 0
@@ -982,6 +1006,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         FeedbackSoundPlayer.playStop()
 
         audioRecorder.stopRecording()
+
+        // Compact spinner while any provider finishes (async upload, OpenAI commit, etc.).
+        subtitleOverlay.showProcessing()
 
         // Small delay to let provider process last audio chunks before finalizing
         let workItem = DispatchWorkItem { [weak self] in

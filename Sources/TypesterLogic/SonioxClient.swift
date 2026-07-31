@@ -1,5 +1,45 @@
 import Foundation
 
+/// Builds the Soniox real-time WebSocket session config JSON.
+public enum SonioxRealtimeSessionConfig {
+    public static func build(
+        apiKey: String,
+        model: String,
+        pasteOnPause: Bool,
+        languageHints: [String],
+        context: [String: Any]?
+    ) -> [String: Any] {
+        var config: [String: Any] = [
+            "api_key": apiKey,
+            "model": model,
+            "audio_format": "pcm_s16le",
+            "sample_rate": 16000,
+            "num_channels": 1
+        ]
+
+        // Endpoint detection finalizes utterance chunks and often inserts periods at
+        // pause boundaries. Only enable it when paste-on-pause needs those signals.
+        if pasteOnPause {
+            config["enable_endpoint_detection"] = true
+            // Prefer fewer false endpoints so brief breaths don't split sentences.
+            config["endpoint_sensitivity"] = -0.7
+            config["max_endpoint_delay_ms"] = 3000
+        } else {
+            config["enable_endpoint_detection"] = false
+        }
+
+        if !languageHints.isEmpty {
+            config["language_hints"] = languageHints
+        }
+
+        if let context {
+            config["context"] = context
+        }
+
+        return config
+    }
+}
+
 /// Soniox STT connection configuration.
 public struct SonioxConnectionConfig: STTConnectionConfig {
     public init() {}
@@ -68,29 +108,13 @@ public class SonioxClient: STTClientBase {
     private func sendConfiguration() {
         guard let apiKey = SettingsStore.shared.apiKey else { return }
 
-        // Always enable endpoint detection so Soniox punctuates on pauses.
-        // Paste-on-pause is handled in AppDelegate's onEndpoint — enabling detection
-        // here does not paste by itself.
-        var config: [String: Any] = [
-            "api_key": apiKey,
-            "model": STTProviderType.soniox.modelID,
-            "audio_format": "pcm_s16le",
-            "sample_rate": 16000,
-            "num_channels": 1,
-            "enable_endpoint_detection": true,
-            // Prefer fewer false endpoints so brief breaths don't split sentences.
-            "endpoint_sensitivity": -0.3,
-            "max_endpoint_delay_ms": 2500
-        ]
-
-        let languageHints = SettingsStore.shared.languageHints
-        if !languageHints.isEmpty {
-            config["language_hints"] = languageHints
-        }
-
-        if let context = SettingsStore.shared.sonioxContext() {
-            config["context"] = context
-        }
+        let config = SonioxRealtimeSessionConfig.build(
+            apiKey: apiKey,
+            model: STTProviderType.soniox.modelID,
+            pasteOnPause: SettingsStore.shared.pasteOnPause,
+            languageHints: SettingsStore.shared.languageHints,
+            context: SettingsStore.shared.sonioxContext()
+        )
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
