@@ -25,6 +25,18 @@ struct OnboardingView: View {
         switch settings.sttProvider {
         case .soniox: return settings.apiKey != nil
         case .deepgram: return settings.deepgramApiKey != nil
+        case .openai: return settings.openaiApiKey != nil
+        }
+    }
+
+    private var apiKeyLink: (String, URL) {
+        switch settings.sttProvider {
+        case .deepgram:
+            return ("Get key", URL(string: "https://console.deepgram.com")!)
+        case .openai:
+            return ("Get key", URL(string: "https://platform.openai.com/api-keys")!)
+        case .soniox:
+            return ("Get key", URL(string: "https://soniox.com")!)
         }
     }
 
@@ -57,9 +69,7 @@ struct OnboardingView: View {
                 stepView(
                     number: 1,
                     title: "Enter your API key",
-                    titleLink: settings.sttProvider == .deepgram
-                        ? ("Get key", URL(string: "https://console.deepgram.com")!)
-                        : ("Get key", URL(string: "https://soniox.com")!),
+                    titleLink: apiKeyLink,
                     description: "You pay the provider directly for usage — no middleman, no subscription.",
                     isActive: currentStep == 1,
                     isComplete: hasApiKey
@@ -121,6 +131,8 @@ struct OnboardingView: View {
                                 settings.apiKey = apiKeyInput
                             case .deepgram:
                                 settings.deepgramApiKey = apiKeyInput
+                            case .openai:
+                                settings.openaiApiKey = apiKeyInput
                             }
                         }
                         withAnimation { currentStep += 1 }
@@ -250,18 +262,29 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var providerAndApiKeyContent: some View {
-        HStack(spacing: 8) {
-            Picker("Provider", selection: $settings.sttProvider) {
-                ForEach(STTProviderType.allCases, id: \.self) { provider in
-                    Text(provider.displayName).tag(provider)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Picker("Provider", selection: $settings.sttProvider) {
+                    ForEach(STTProviderType.allCases, id: \.self) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
                 }
-            }
-            .labelsHidden()
-            .fixedSize()
+                .labelsHidden()
+                .fixedSize()
 
-            SecureField("Paste your API key", text: $apiKeyInput)
-                .textFieldStyle(.roundedBorder)
-                .focused($isApiKeyFocused)
+                SecureField("Paste your API key", text: $apiKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isApiKeyFocused)
+            }
+
+            if settings.sttProvider == .openai {
+                Picker("Model", selection: $settings.openaiModel) {
+                    ForEach(OpenAITranscribeModel.allCases) { model in
+                        Text(model.displayName).tag(model)
+                    }
+                }
+                .labelsHidden()
+            }
         }
     }
 
@@ -310,6 +333,8 @@ struct OnboardingView: View {
             apiKeyInput = settings.apiKey ?? ""
         case .deepgram:
             apiKeyInput = settings.deepgramApiKey ?? ""
+        case .openai:
+            apiKeyInput = settings.openaiApiKey ?? ""
         }
     }
 

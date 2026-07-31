@@ -18,6 +18,7 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "punctuate", value: "true"),
+            URLQueryItem(name: "smart_format", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "endpointing", value: endpointing)
         ]
