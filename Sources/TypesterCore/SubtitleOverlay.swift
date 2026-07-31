@@ -93,6 +93,22 @@ struct SubtitleView: View {
     @ObservedObject var viewModel: SubtitleViewModel
 
     var body: some View {
+        // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
+        // fade; the capsule is drawn inset by the same margins as this padding.
+        pillContent
+            .padding(.horizontal, 44)
+            .padding(.top, 36)
+            .padding(.bottom, 44)
+            .background(
+                SoftShadowPillBackground(
+                    cornerRadius: 20,
+                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+                )
+            )
+            .fixedSize()
+    }
+
+    private var pillContent: some View {
         HStack(spacing: 8) {
             if let icon = viewModel.targetAppIcon {
                 Image(nsImage: icon)
@@ -129,11 +145,6 @@ struct SubtitleView: View {
         .frame(minHeight: 20)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.black)
-        )
-        .fixedSize()
     }
 }
 
@@ -213,9 +224,13 @@ class SubtitleOverlay {
         )
         window.isOpaque = false
         window.backgroundColor = .clear
+        window.hasShadow = false
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         window.ignoresMouseEvents = true
+        hosting.wantsLayer = true
+        hosting.layer?.masksToBounds = false
+        hosting.clipsToBounds = false
         window.contentView = hosting
 
         self.window = window
@@ -242,12 +257,13 @@ class SubtitleOverlay {
         let fittingSize = hosting.fittingSize
         guard fittingSize.width > 0 && fittingSize.height > 0 else { return }
 
-        // Clamp width to max
-        let width = min(fittingSize.width, maxWidth)
+        let shadowPad: CGFloat = 68
+        let width = min(fittingSize.width, maxWidth + shadowPad)
         let height = fittingSize.height
 
         let x = screen.frame.midX - width / 2
-        let y = screen.frame.minY + 80
+        // Extra bottom padding is for the baked shadow fade; keep the capsule near the dock.
+        let y = screen.frame.minY + 48
         let newFrame = NSRect(origin: NSPoint(x: x, y: y), size: NSSize(width: width, height: height))
 
         Debug.log("Overlay reposition: x=\(Int(x)) y=\(Int(y)) w=\(Int(width)) h=\(Int(height))")
