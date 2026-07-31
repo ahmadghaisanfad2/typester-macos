@@ -13,9 +13,11 @@ class SubtitleViewModel: ObservableObject {
     @Published var audioLevels: [CGFloat] = Array(repeating: 0.08, count: 5)
     /// When false, hide live transcript text; app name and waveform still show.
     @Published var showStreamPreview: Bool = true
+    /// True while waiting for the provider to finalize / return the transcript.
+    @Published var isProcessing: Bool = false
 
     var displayText: String {
-        guard showStreamPreview else { return "" }
+        guard showStreamPreview, !isProcessing else { return "" }
         if !finalText.isEmpty && !interimText.isEmpty
             && !finalText.hasSuffix(" ") && !interimText.hasPrefix(" ") {
             return finalText + " " + interimText
@@ -26,6 +28,7 @@ class SubtitleViewModel: ObservableObject {
     func show(appName: String, appIcon: NSImage?) {
         finalText = ""
         interimText = ""
+        isProcessing = false
         targetAppName = appName
         targetAppIcon = appIcon
         audioLevels = Array(repeating: 0.08, count: 5)
@@ -37,20 +40,31 @@ class SubtitleViewModel: ObservableObject {
         isActive = false
         finalText = ""
         interimText = ""
+        isProcessing = false
         targetAppName = ""
         targetAppIcon = nil
         audioLevels = Array(repeating: 0.08, count: 5)
     }
 
     func updateFinal(_ text: String) {
-        guard showStreamPreview else { return }
+        guard showStreamPreview, !isProcessing else { return }
         finalText += text
         interimText = ""
     }
 
     func updateInterim(_ text: String) {
-        guard showStreamPreview else { return }
+        guard showStreamPreview, !isProcessing else { return }
         interimText = text
+    }
+
+    /// Compact post-stop waiting state (spinner + small label).
+    func showProcessing() {
+        isProcessing = true
+        interimText = ""
+    }
+
+    func clearProcessing() {
+        isProcessing = false
     }
 
     func clearText() {
@@ -116,30 +130,42 @@ struct SubtitleView: View {
                     .frame(width: 20, height: 20)
             }
 
-            WaveformIcon(viewModel: viewModel)
+            if viewModel.isProcessing {
+                ProgressView()
+                    .controlSize(.small)
+                    .colorScheme(.dark)
+                    .frame(width: 14, height: 14)
 
-            if viewModel.showStreamPreview, !viewModel.displayText.isEmpty {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(viewModel.displayText)
-                            .font(.system(size: 16))
-                            .foregroundColor(.white)
-                            .fixedSize()
-                            .id("text")
+                Text("Transcribing")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.75))
+                    .tracking(0.2)
+            } else {
+                WaveformIcon(viewModel: viewModel)
+
+                if viewModel.showStreamPreview, !viewModel.displayText.isEmpty {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(viewModel.displayText)
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+                                .fixedSize()
+                                .id("text")
+                        }
+                        .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
+                        .onChange(of: viewModel.displayText) { _ in
+                            proxy.scrollTo("text", anchor: .trailing)
+                        }
+                        .onAppear {
+                            proxy.scrollTo("text", anchor: .trailing)
+                        }
                     }
-                    .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
-                    .onChange(of: viewModel.displayText) { _ in
-                        proxy.scrollTo("text", anchor: .trailing)
-                    }
-                    .onAppear {
-                        proxy.scrollTo("text", anchor: .trailing)
-                    }
+                } else if !viewModel.targetAppName.isEmpty {
+                    // Always show the active app name when preview is off or text has not arrived yet.
+                    Text(viewModel.targetAppName)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.7))
                 }
-            } else if !viewModel.targetAppName.isEmpty {
-                // Always show the active app name when preview is off or text has not arrived yet.
-                Text(viewModel.targetAppName)
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.7))
             }
         }
         .frame(minHeight: 20)
@@ -186,6 +212,20 @@ class SubtitleOverlay {
         DispatchQueue.main.async {
             guard self.viewModel.showStreamPreview else { return }
             self.viewModel.updateInterim(text)
+            DispatchQueue.main.async { self.repositionWindow() }
+        }
+    }
+
+    func showProcessing() {
+        DispatchQueue.main.async {
+            self.viewModel.showProcessing()
+            DispatchQueue.main.async { self.repositionWindow() }
+        }
+    }
+
+    func clearProcessing() {
+        DispatchQueue.main.async {
+            self.viewModel.clearProcessing()
             DispatchQueue.main.async { self.repositionWindow() }
         }
     }

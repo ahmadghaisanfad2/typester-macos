@@ -42,6 +42,21 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                    } else if settings.sttProvider == .soniox {
+                        Picker("Mode", selection: $settings.sonioxMode) {
+                            ForEach(SonioxTranscribeMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        Text(settings.sonioxMode.modelID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text(settings.sonioxMode == .realtime
+                             ? "Real-time streams live text while you speak."
+                             : "Async records locally, then transcribes after you stop (no live text).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else {
                         LabeledContent("Model") {
                             Text(settings.sttProvider.modelID)
@@ -134,10 +149,13 @@ struct SettingsView: View {
                     Toggle("Show stream preview", isOn: $settings.showStreamPreview)
                     Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
                     Toggle("Paste on pause", isOn: $settings.pasteOnPause)
+                        .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
                 } header: {
                     Text("Feedback")
                 } footer: {
-                    Text("Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected.")
+                    Text(settings.sttProvider == .soniox && settings.sonioxMode == .async
+                         ? "Paste on pause is unavailable in Soniox Async mode (no live endpoints while recording)."
+                         : "Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected.")
                         .foregroundStyle(.secondary)
                 }
 

@@ -176,6 +176,9 @@ final class ModelsTests: XCTestCase {
     }
 
     func testSTTProviderTypeModelID() {
+        let previous = SettingsStore.shared.sonioxMode
+        defer { SettingsStore.shared.sonioxMode = previous }
+        SettingsStore.shared.sonioxMode = .realtime
         XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
     }
