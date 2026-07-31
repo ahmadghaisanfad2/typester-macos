@@ -9,8 +9,10 @@ class SubtitleViewModel: ObservableObject {
     @Published var targetAppName: String = ""
     @Published var targetAppIcon: NSImage?
     @Published var maxCapsuleWidth: CGFloat = 600
-    /// Recent normalized mic levels (oldest → newest), used by WaveformIcon.
-    @Published var audioLevels: [CGFloat] = Array(repeating: 0.08, count: 5)
+    /// Latest mic envelope target (0...1). WaveformIcon interpolates toward this at display refresh.
+    @Published var targetAudioLevel: CGFloat = 0.08
+    fileprivate static let barCount = 7
+    fileprivate static let levelFloor: CGFloat = 0.08
     /// When false, hide live transcript text; app name and waveform still show.
     @Published var showStreamPreview: Bool = true
     /// True while waiting for the provider to finalize / return the transcript.
@@ -31,7 +33,7 @@ class SubtitleViewModel: ObservableObject {
         isProcessing = false
         targetAppName = appName
         targetAppIcon = appIcon
-        audioLevels = Array(repeating: 0.08, count: 5)
+        targetAudioLevel = Self.levelFloor
         showStreamPreview = SettingsStore.shared.showStreamPreview
         isActive = true
     }
@@ -43,7 +45,7 @@ class SubtitleViewModel: ObservableObject {
         isProcessing = false
         targetAppName = ""
         targetAppIcon = nil
-        audioLevels = Array(repeating: 0.08, count: 5)
+        targetAudioLevel = Self.levelFloor
     }
 
     func updateFinal(_ text: String) {
@@ -73,34 +75,56 @@ class SubtitleViewModel: ObservableObject {
     }
 
     func updateAudioLevel(_ level: Float) {
-        let clamped = CGFloat(min(1, max(0, level)))
-        // Soft floor so idle mic still shows a tiny bar; attack is immediate, decay is gentle.
-        let displayed = max(0.08, clamped)
-        var next = Array(audioLevels.dropFirst())
-        next.append(displayed)
-        // Decay older bars slightly so the wave reads left→right with the voice.
-        for i in 0..<next.count - 1 {
-            next[i] = max(0.08, next[i] * 0.85)
+        let sample = CGFloat(min(1, max(0, level)))
+        // Fast attack, soft release — display layer interpolates at 60 FPS.
+        if sample >= targetAudioLevel {
+            targetAudioLevel = sample
+        } else {
+            targetAudioLevel = targetAudioLevel + (sample - targetAudioLevel) * 0.35
         }
-        audioLevels = next
     }
 }
 
 struct WaveformIcon: View {
     @ObservedObject var viewModel: SubtitleViewModel
+    /// Mutable display envelope without publishing every frame (TimelineView already redraws).
+    @State private var displayBox = WaveformDisplayBox()
+
+    /// Compact symmetric weights (keeps the pill short).
+    private static let weights: [CGFloat] = [0.45, 0.7, 0.9, 1.0, 0.9, 0.7, 0.45]
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<5, id: \.self) { index in
-                let level = index < viewModel.audioLevels.count ? viewModel.audioLevels[index] : 0.08
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.white.opacity(0.9))
-                    .frame(width: 2, height: 4 + level * 12)
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !viewModel.isActive)) { context in
+            let displayLevel = advanceDisplay()
+            HStack(spacing: 1.5) {
+                ForEach(0..<SubtitleViewModel.barCount, id: \.self) { index in
+                    let weight = index < Self.weights.count ? Self.weights[index] : 0.5
+                    // Light phase motion so bars feel alive without looking random.
+                    let phase = sin(context.date.timeIntervalSinceReferenceDate * 10.5 + Double(index) * 0.7)
+                    let shimmer = 0.88 + 0.12 * CGFloat(phase)
+                    let level = max(SubtitleViewModel.levelFloor, displayLevel * weight * shimmer)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.white.opacity(0.92))
+                        .frame(width: 2, height: 3.5 + level * 12)
+                }
             }
+            .frame(width: 26, height: 16)
         }
-        .frame(height: 16)
-        .animation(.easeOut(duration: 0.08), value: viewModel.audioLevels)
     }
+
+    private func advanceDisplay() -> CGFloat {
+        let target = max(SubtitleViewModel.levelFloor, viewModel.targetAudioLevel)
+        if target >= displayBox.level {
+            displayBox.level = target
+        } else {
+            displayBox.level += (target - displayBox.level) * 0.28
+        }
+        return displayBox.level
+    }
+}
+
+private final class WaveformDisplayBox {
+    var level: CGFloat = SubtitleViewModel.levelFloor
 }
 
 struct SubtitleView: View {

@@ -148,6 +148,18 @@ struct SettingsView: View {
                 Section {
                     Toggle("Show stream preview", isOn: $settings.showStreamPreview)
                     Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
+                    HStack {
+                        Text("Sound volume")
+                        Slider(value: Binding(
+                            get: { Double(settings.dictationSoundVolume) },
+                            set: { settings.dictationSoundVolume = Float($0) }
+                        ), in: 0...1)
+                        Text("\(Int((settings.dictationSoundVolume * 100).rounded()))%")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                    .disabled(!settings.playDictationSounds)
                     Toggle("Paste on pause", isOn: $settings.pasteOnPause)
                         .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
                 } header: {

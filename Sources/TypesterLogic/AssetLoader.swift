@@ -44,4 +44,12 @@ public enum AssetLoader {
         }
         return NSImage(contentsOfFile: path)
     }
+
+    /// Loads a short feedback sound from bundle Resources or `Assets/`.
+    public static func loadSound(named filename: String) -> NSSound? {
+        guard let path = findAssetPath(filename: filename) else {
+            return nil
+        }
+        return NSSound(contentsOfFile: path, byReference: true)
+    }
 }

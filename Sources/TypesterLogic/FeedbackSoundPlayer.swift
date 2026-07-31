@@ -1,20 +1,27 @@
 import AppKit
 
-/// Plays short system sounds for dictation start/stop feedback.
+/// Plays short sounds for dictation start/stop feedback.
 public enum FeedbackSoundPlayer {
     public static func playStart() {
         guard SettingsStore.shared.playDictationSounds else { return }
-        play(named: "Tink")
+        playBundled(named: "dictation-start.wav", fallbackSystemName: "Submarine")
     }
 
     public static func playStop() {
         guard SettingsStore.shared.playDictationSounds else { return }
-        play(named: "Pop")
+        playBundled(named: "dictation-stop.wav", fallbackSystemName: "Blow")
     }
 
-    private static func play(named name: String) {
+    private static func playBundled(named filename: String, fallbackSystemName: String) {
         DispatchQueue.main.async {
-            NSSound(named: NSSound.Name(name))?.play()
+            let volume = SettingsStore.shared.dictationSoundVolume
+            if let sound = AssetLoader.loadSound(named: filename) {
+                sound.volume = volume
+                sound.play()
+            } else if let sound = NSSound(named: NSSound.Name(fallbackSystemName)) {
+                sound.volume = volume
+                sound.play()
+            }
         }
     }
 }

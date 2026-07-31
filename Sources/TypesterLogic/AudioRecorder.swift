@@ -6,6 +6,7 @@ public class AudioRecorder {
     public init() {}
     private var audioEngine: AVAudioEngine?
     private var isRecording = false
+    private var isPreparingEngine = false
     private var lastLevelEmit: CFAbsoluteTime = 0
 
     /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram, 24 kHz OpenAI).
@@ -14,7 +15,7 @@ public class AudioRecorder {
     // MARK: - Callbacks
 
     public var onAudioBuffer: ((Data) -> Void)?
-    /// Normalized mic level in 0...1, called on the main queue (~30 Hz).
+    /// Normalized mic level in 0...1, called on the main queue (~60 Hz).
     public var onAudioLevel: ((Float) -> Void)?
     public var onError: ((String) -> Void)?
 
@@ -39,6 +40,20 @@ public class AudioRecorder {
     }
 
     // MARK: - Recording
+
+    /// Pre-create the audio engine so the first dictate press is not blocked by CoreAudio init.
+    /// Runs on the main thread shortly after launch — off-thread creation can bind a bad input format.
+    public func prepareEngine() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            guard self.audioEngine == nil, !self.isPreparingEngine else { return }
+            self.isPreparingEngine = true
+            let engine = AVAudioEngine()
+            _ = engine.inputNode.outputFormat(forBus: 0)
+            self.audioEngine = engine
+            self.isPreparingEngine = false
+        }
+    }
 
     public func startRecording() {
         Debug.log("startRecording() called, isRecording=\(isRecording)")
@@ -67,7 +82,8 @@ public class AudioRecorder {
         Debug.log("Stopping audio engine...")
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
-        audioEngine = nil
+        audioEngine?.reset()
+        // Keep the engine warm — recreating AVAudioEngine is multi-second when Discord holds audio devices.
         isRecording = false
         lastLevelEmit = 0
         DispatchQueue.main.async { [weak self] in
@@ -94,8 +110,13 @@ public class AudioRecorder {
     }
 
     private func setupAndStart() {
-        audioEngine = AVAudioEngine()
-        guard let audioEngine = audioEngine else { return }
+        let audioEngine: AVAudioEngine
+        if let existing = self.audioEngine {
+            audioEngine = existing
+        } else {
+            audioEngine = AVAudioEngine()
+            self.audioEngine = audioEngine
+        }
 
         // Set selected microphone if specified
         if let micIDString = SettingsStore.shared.selectedMicrophoneID,
@@ -123,20 +144,31 @@ public class AudioRecorder {
             return
         }
 
-        let inputBufferSize: AVAudioFrameCount = 4096
-        let outputBufferSize = AVAudioFrameCount(Double(inputBufferSize) * (sampleRate / inputFormat.sampleRate))
+        // Request ~60 Hz taps; CoreAudio may deliver larger buffers — always size convert from actual frames.
+        let inputBufferSize = AVAudioFrameCount(
+            max(256, min(1024, inputFormat.sampleRate / 60.0))
+        )
+        let rateRatio = sampleRate / max(inputFormat.sampleRate, 1)
 
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
             self.emitAudioLevel(from: buffer)
 
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputBufferSize) else {
+            // Capacity must follow the delivered frameLength (not the requested buffer hint).
+            let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * rateRatio) + 64
+            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: max(outCapacity, 1)) else {
                 return
             }
 
             var error: NSError?
+            var provided = false
             let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+                if provided {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                provided = true
                 outStatus.pointee = .haveData
                 return buffer
             }
@@ -167,29 +199,34 @@ public class AudioRecorder {
         guard onAudioLevel != nil else { return }
 
         let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastLevelEmit >= 1.0 / 30.0 else { return }
+        guard now - lastLevelEmit >= 1.0 / 60.0 else { return }
         lastLevelEmit = now
 
-        let level = Self.normalizedRMS(from: buffer)
+        let level = Self.normalizedLevel(from: buffer)
         DispatchQueue.main.async { [weak self] in
             self?.onAudioLevel?(level)
         }
     }
 
-    /// RMS of the buffer, boosted for speech and clamped to 0...1.
-    private static func normalizedRMS(from buffer: AVAudioPCMBuffer) -> Float {
+    /// Peak + RMS hybrid, boosted for speech and clamped to 0...1.
+    private static func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Float {
         let frameLength = Int(buffer.frameLength)
         guard frameLength > 0 else { return 0 }
 
         var sum: Float = 0
+        var peak: Float = 0
         if let floatData = buffer.floatChannelData?[0] {
             for i in 0..<frameLength {
                 let s = floatData[i]
+                let a = abs(s)
+                if a > peak { peak = a }
                 sum += s * s
             }
         } else if let int16Data = buffer.int16ChannelData?[0] {
             for i in 0..<frameLength {
                 let s = Float(int16Data[i]) / Float(Int16.max)
+                let a = abs(s)
+                if a > peak { peak = a }
                 sum += s * s
             }
         } else {
@@ -197,7 +234,7 @@ public class AudioRecorder {
         }
 
         let rms = sqrt(sum / Float(frameLength))
-        // Speech RMS is typically small; boost so normal talking fills the bars.
-        return min(1, max(0, rms * 12))
+        // Speech levels are small; boost so talking fills the bars. Peak catches consonants.
+        return min(1, max(0, max(rms * 12, peak * 0.85)))
     }
 }
