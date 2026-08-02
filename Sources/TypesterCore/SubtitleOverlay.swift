@@ -17,6 +17,8 @@ class SubtitleViewModel: ObservableObject {
     @Published var showStreamPreview: Bool = true
     /// True while waiting for the provider to finalize / return the transcript.
     @Published var isProcessing: Bool = false
+    /// True while the pointer is over the pill's interactive area.
+    @Published var isHovering: Bool = false
 
     var displayText: String {
         guard showStreamPreview, !isProcessing else { return "" }
@@ -31,6 +33,7 @@ class SubtitleViewModel: ObservableObject {
         finalText = ""
         interimText = ""
         isProcessing = false
+        isHovering = false
         targetAppName = appName
         targetAppIcon = appIcon
         targetAudioLevel = Self.levelFloor
@@ -43,6 +46,7 @@ class SubtitleViewModel: ObservableObject {
         finalText = ""
         interimText = ""
         isProcessing = false
+        isHovering = false
         targetAppName = ""
         targetAppIcon = nil
         targetAudioLevel = Self.levelFloor
@@ -129,6 +133,7 @@ private final class WaveformDisplayBox {
 
 struct SubtitleView: View {
     @ObservedObject var viewModel: SubtitleViewModel
+    var onCancel: (() -> Void)?
 
     var body: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
@@ -147,6 +152,39 @@ struct SubtitleView: View {
     }
 
     private var pillContent: some View {
+        ZStack {
+            regularContent
+                // Keep the regular content in the layout while hovering so the
+                // window does not resize underneath the pointer and flicker.
+                .opacity(viewModel.isHovering ? 0 : 1)
+                .allowsHitTesting(!viewModel.isHovering)
+
+            if viewModel.isHovering {
+                Button {
+                    onCancel?()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.white.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Cancel transcription")
+                .help("Cancel transcription")
+            }
+        }
+        .frame(minHeight: 20)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onHover { isHovering in
+            viewModel.isHovering = isHovering
+        }
+    }
+
+    private var regularContent: some View {
         HStack(spacing: 8) {
             if let icon = viewModel.targetAppIcon {
                 Image(nsImage: icon)
@@ -192,9 +230,6 @@ struct SubtitleView: View {
                 }
             }
         }
-        .frame(minHeight: 20)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 }
 
@@ -203,6 +238,7 @@ class SubtitleOverlay {
 
     let viewModel = SubtitleViewModel()
     private var window: NSWindow?
+    var onCancel: (() -> Void)?
 
     private init() {}
 
@@ -277,7 +313,10 @@ class SubtitleOverlay {
 
         viewModel.maxCapsuleWidth = maxCapsuleWidth()
         let hosting = NSHostingView(
-            rootView: SubtitleView(viewModel: viewModel)
+            rootView: SubtitleView(
+                viewModel: viewModel,
+                onCancel: { [weak self] in self?.onCancel?() }
+            )
         )
 
         let window = NSWindow(
@@ -291,7 +330,8 @@ class SubtitleOverlay {
         window.hasShadow = false
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.ignoresMouseEvents = true
+        window.acceptsMouseMovedEvents = true
+        window.ignoresMouseEvents = false
         hosting.wantsLayer = true
         hosting.layer?.masksToBounds = false
         hosting.clipsToBounds = false

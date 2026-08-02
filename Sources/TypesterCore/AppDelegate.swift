@@ -50,6 +50,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public override init() {
         super.init()
+        subtitleOverlay.onCancel = { [weak self] in
+            self?.cancelActiveTranscription()
+        }
     }
 
     // MARK: - App lifecycle
@@ -188,14 +191,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onFinalized = { [weak self] in
             guard let self = self else { return }
-            if self.isRetranscribing {
-                self.handleRetranscribeFinalized()
-                return
-            }
             if self.sessionDiscarded {
                 self.sessionDiscarded = false
                 self.subtitleOverlay.hide()
                 self.sttProvider.disconnect()
+                return
+            }
+            if self.isRetranscribing {
+                self.handleRetranscribeFinalized()
                 return
             }
             self.pasteAccumulatedTranscript(saveHistory: true)
@@ -205,6 +208,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onError = { [weak self] error in
             guard let self = self else { return }
+            if self.sessionDiscarded {
+                self.sessionDiscarded = false
+                self.isRecording = false
+                self.statusItem.button?.image = self.normalIcon
+                self.subtitleOverlay.hide()
+                self.audioRecorder.stopRecording()
+                self.sttProvider.disconnect()
+                return
+            }
             if self.isRetranscribing {
                 self.finishRetranscribe(success: false)
                 self.sttProvider.disconnect()
@@ -807,6 +819,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         retranscribeEntryID = nil
         pendingFinalizeWorkItem?.cancel()
         pendingFinalizeWorkItem = nil
+        // Do not rely on the provider's disconnect callback to clean up the
+        // processing pill. Some providers finalize before their socket emits
+        // a disconnect event, which otherwise leaves the spinner on screen.
+        subtitleOverlay.hide()
         Debug.log("Re-transcribe finished success=\(success)")
         rebuildMenu()
     }
@@ -1094,6 +1110,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Debug.log("cancelRecording() called, isRecording=\(isRecording)")
         guard isRecording else { return }
 
+        cancelActiveTranscription()
+    }
+
+    private func cancelActiveTranscription() {
+        Debug.log("cancelActiveTranscription() called, isRecording=\(isRecording), isRetranscribing=\(isRetranscribing)")
+
+        if isRetranscribing {
+            // Re-use the discard guard so a late provider callback cannot paste
+            // or save a result after the user has cancelled the retry.
+            sessionDiscarded = true
+            accumulatedText = ""
+            lastInterimText = ""
+            finishRetranscribe(success: false)
+            sttProvider.disconnect()
+            return
+        }
+
+        guard isRecording || subtitleOverlay.viewModel.isActive else { return }
+
+        let wasRecording = isRecording
         pendingFinalizeWorkItem?.cancel()
         pendingFinalizeWorkItem = nil
 
@@ -1106,11 +1142,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.image = normalIcon
         rebuildMenu()
 
-        FeedbackSoundPlayer.playStop()
+        if wasRecording {
+            FeedbackSoundPlayer.playStop()
+        }
         audioRecorder.stopRecording()
         subtitleOverlay.hide()
         sttProvider.disconnect()
-        sessionDiscarded = false
     }
 
     // MARK: - Shortcut display
