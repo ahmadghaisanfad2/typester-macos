@@ -54,6 +54,7 @@ public enum SonioxAsyncError: LocalizedError {
     case missingAPIKey
     case emptyAudio
     case invalidResponse(String)
+    case transient(String)
     case transcriptionFailed(String)
     case timeout
     case cancelled
@@ -63,6 +64,7 @@ public enum SonioxAsyncError: LocalizedError {
         case .missingAPIKey: return "API key not configured"
         case .emptyAudio: return "No audio to transcribe"
         case .invalidResponse(let detail): return detail
+        case .transient(let detail): return detail
         case .transcriptionFailed(let detail): return detail
         case .timeout: return "Soniox async transcription timed out"
         case .cancelled: return "Transcription cancelled"
@@ -79,9 +81,14 @@ public final class SonioxAsyncClient: STTProvider {
     public var onConnected: (() -> Void)?
     public var onDisconnected: (() -> Void)?
 
-    public private(set) var isConnected = false
+    private let stateLock = NSLock()
+    private var connectedState = false
+    private var sessionGeneration: UInt = 0
+    public var isConnected: Bool {
+        stateLock.withLock { connectedState }
+    }
 
-    private var pcmBuffer = Data()
+    private let pcmBuffer = AudioSessionBuffer()
     private var sampleRate: Int = 16_000
     private var session: URLSession
     private var isFinalizing = false
@@ -100,73 +107,118 @@ public final class SonioxAsyncClient: STTProvider {
             onError?(SonioxAsyncError.missingAPIKey.localizedDescription)
             return
         }
-        isCancelled = false
-        isFinalizing = false
-        pcmBuffer = Data()
-        sampleRate = Int(STTProviderType.soniox.audioSampleRate)
-        isConnected = true
+        stateLock.withLock {
+            isCancelled = false
+            isFinalizing = false
+            connectedState = true
+            sessionGeneration &+= 1
+            sampleRate = Int(STTProviderType.soniox.audioSampleRate)
+        }
+        pcmBuffer.clear()
         onConnected?()
     }
 
     public func disconnect() {
-        isCancelled = true
-        isFinalizing = false
+        let wasConnected = stateLock.withLock { () -> Bool in
+            let wasConnected = connectedState
+            isCancelled = true
+            isFinalizing = false
+            connectedState = false
+            sessionGeneration &+= 1
+            return wasConnected
+        }
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        pcmBuffer = Data()
-        let wasConnected = isConnected
-        isConnected = false
+        pcmBuffer.clear()
         if wasConnected {
             onDisconnected?()
         }
     }
 
     public func sendAudio(_ data: Data) {
-        guard isConnected, !isFinalizing else { return }
+        let canBuffer = stateLock.withLock { connectedState && !isFinalizing }
+        guard canBuffer else { return }
         pcmBuffer.append(data)
     }
 
     public func sendFinalize() {
-        guard isConnected else { return }
-        guard !isFinalizing else { return }
-        isFinalizing = true
+        let finalizeState = stateLock.withLock { () -> (isConnected: Bool, shouldFinalize: Bool, sampleRate: Int, generation: UInt) in
+            guard connectedState else { return (false, false, sampleRate, sessionGeneration) }
+            guard !isFinalizing else { return (true, false, sampleRate, sessionGeneration) }
+            isFinalizing = true
+            return (true, true, sampleRate, sessionGeneration)
+        }
+        guard finalizeState.isConnected, finalizeState.shouldFinalize else { return }
 
-        let pcm = pcmBuffer
-        pcmBuffer = Data()
+        let pcm = pcmBuffer.take()
         guard !pcm.isEmpty else {
-            finishWithError(SonioxAsyncError.emptyAudio)
+            finishWithError(SonioxAsyncError.emptyAudio, generation: finalizeState.generation)
             return
         }
 
         guard let apiKey = SettingsStore.shared.apiKey, !apiKey.isEmpty else {
-            finishWithError(SonioxAsyncError.missingAPIKey)
+            finishWithError(SonioxAsyncError.missingAPIKey, generation: finalizeState.generation)
             return
         }
 
-        let wav = PCMWavEncoder.wavData(pcm: pcm, sampleRate: sampleRate)
+        let wav = PCMWavEncoder.wavData(pcm: pcm, sampleRate: finalizeState.sampleRate)
         Debug.log("Soniox async: uploading \(wav.count) byte WAV")
 
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let fileID = try await self.uploadFile(wav: wav, apiKey: apiKey)
-                try self.throwIfCancelled()
-                let transcriptionID = try await self.createTranscription(fileID: fileID, apiKey: apiKey)
-                try self.throwIfCancelled()
-                try await self.pollUntilComplete(transcriptionID: transcriptionID, apiKey: apiKey)
-                try self.throwIfCancelled()
-                let text = try await self.fetchTranscript(transcriptionID: transcriptionID, apiKey: apiKey)
-                self.bestEffortCleanup(transcriptionID: transcriptionID, fileID: fileID, apiKey: apiKey)
-                self.finishWithTranscript(text)
+                let text = try await self.transcribeWithRetry(
+                    wav: wav,
+                    apiKey: apiKey,
+                    generation: finalizeState.generation
+                )
+                self.finishWithTranscript(text, generation: finalizeState.generation)
             } catch let error as SonioxAsyncError {
                 if case .cancelled = error { return }
-                self.finishWithError(error)
+                self.finishWithError(error, generation: finalizeState.generation)
             } catch is CancellationError {
                 return
             } catch {
                 if (error as NSError).code == NSURLErrorCancelled { return }
-                self.finishWithError(.invalidResponse(error.localizedDescription))
+                self.finishWithError(.invalidResponse(error.localizedDescription), generation: finalizeState.generation)
             }
+        }
+    }
+
+    private func transcribeWithRetry(wav: Data, apiKey: String, generation: UInt) async throws -> String {
+        var attempt = 0
+        while true {
+            do {
+                return try await transcribeOnce(wav: wav, apiKey: apiKey, generation: generation)
+            } catch {
+                try throwIfCancelled(for: generation)
+                guard attempt == 0, isTransient(error) else { throw error }
+                attempt += 1
+                Debug.log("Soniox async transient failure; retrying once")
+                try await sleep(0.35, generation: generation)
+            }
+        }
+    }
+
+    private func transcribeOnce(wav: Data, apiKey: String, generation: UInt) async throws -> String {
+        let fileID = try await uploadFile(wav: wav, apiKey: apiKey)
+        do {
+            try throwIfCancelled(for: generation)
+            let transcriptionID = try await createTranscription(fileID: fileID, apiKey: apiKey)
+            try throwIfCancelled(for: generation)
+            try await pollUntilComplete(
+                transcriptionID: transcriptionID,
+                apiKey: apiKey,
+                generation: generation
+            )
+            try throwIfCancelled(for: generation)
+            let text = try await fetchTranscript(transcriptionID: transcriptionID, apiKey: apiKey)
+            try throwIfCancelled(for: generation)
+            bestEffortCleanup(transcriptionID: transcriptionID, fileID: fileID, apiKey: apiKey)
+            return text
+        } catch {
+            bestEffortDeleteFile(fileID: fileID, apiKey: apiKey)
+            throw error
         }
     }
 
@@ -190,7 +242,7 @@ public final class SonioxAsyncClient: STTProvider {
         let (data, response) = try await perform(request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
-            throw SonioxAsyncError.invalidResponse(SonioxAsyncAPI.apiErrorMessage(from: data, statusCode: code))
+            throw makeHTTPError(data: data, statusCode: code)
         }
         return try SonioxAsyncAPI.parseFileID(from: data)
     }
@@ -217,23 +269,24 @@ public final class SonioxAsyncClient: STTProvider {
         let (data, response) = try await perform(request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
-            throw SonioxAsyncError.invalidResponse(SonioxAsyncAPI.apiErrorMessage(from: data, statusCode: code))
+            throw makeHTTPError(data: data, statusCode: code)
         }
         return try SonioxAsyncAPI.parseTranscriptionID(from: data)
     }
 
-    private func pollUntilComplete(transcriptionID: String, apiKey: String) async throws {
+    private func pollUntilComplete(transcriptionID: String, apiKey: String, generation: UInt) async throws {
         let deadline = Date().addingTimeInterval(pollTimeout)
         while Date() < deadline {
-            try throwIfCancelled()
+            try throwIfCancelled(for: generation)
             let status = try await fetchStatus(transcriptionID: transcriptionID, apiKey: apiKey)
+            try throwIfCancelled(for: generation)
             switch status.status {
             case "completed":
                 return
             case "error":
                 throw SonioxAsyncError.transcriptionFailed(status.errorMessage ?? "Transcription failed")
             default:
-                try await sleep(pollInterval)
+                try await sleep(pollInterval, generation: generation)
             }
         }
         throw SonioxAsyncError.timeout
@@ -251,7 +304,7 @@ public final class SonioxAsyncClient: STTProvider {
         let (data, response) = try await perform(request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
-            throw SonioxAsyncError.invalidResponse(SonioxAsyncAPI.apiErrorMessage(from: data, statusCode: code))
+            throw makeHTTPError(data: data, statusCode: code)
         }
         return try SonioxAsyncAPI.parseTranscriptionStatus(from: data)
     }
@@ -269,14 +322,28 @@ public final class SonioxAsyncClient: STTProvider {
         let (data, response) = try await perform(request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
-            throw SonioxAsyncError.invalidResponse(SonioxAsyncAPI.apiErrorMessage(from: data, statusCode: code))
+            throw makeHTTPError(data: data, statusCode: code)
         }
         return try SonioxAsyncAPI.parseTranscriptText(from: data)
+    }
+
+    private func makeHTTPError(data: Data, statusCode: Int) -> SonioxAsyncError {
+        let message = SonioxAsyncAPI.apiErrorMessage(from: data, statusCode: statusCode)
+        if statusCode == 429 || (500...599).contains(statusCode) {
+            return .transient(message)
+        }
+        return .invalidResponse(message)
     }
 
     private func bestEffortCleanup(transcriptionID: String, fileID: String, apiKey: String) {
         Task {
             await deleteResource(pathComponents: ["v1", "transcriptions", transcriptionID], apiKey: apiKey)
+            await deleteResource(pathComponents: ["v1", "files", fileID], apiKey: apiKey)
+        }
+    }
+
+    private func bestEffortDeleteFile(fileID: String, apiKey: String) {
+        Task {
             await deleteResource(pathComponents: ["v1", "files", fileID], apiKey: apiKey)
         }
     }
@@ -299,19 +366,43 @@ public final class SonioxAsyncClient: STTProvider {
         return (data, response)
     }
 
-    private func sleep(_ seconds: TimeInterval) async throws {
+    private func sleep(_ seconds: TimeInterval, generation: UInt? = nil) async throws {
         try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        try throwIfCancelled()
+        try throwIfCancelled(for: generation)
     }
 
-    private func throwIfCancelled() throws {
-        if isCancelled { throw SonioxAsyncError.cancelled }
+    private func throwIfCancelled(for generation: UInt? = nil) throws {
+        let shouldCancel = stateLock.withLock {
+            isCancelled || (generation.map { $0 != sessionGeneration } ?? false)
+        }
+        if shouldCancel { throw SonioxAsyncError.cancelled }
     }
 
-    private func finishWithTranscript(_ text: String) {
+    private func isTransient(_ error: Error) -> Bool {
+        if let asyncError = error as? SonioxAsyncError {
+            switch asyncError {
+            case .transient, .timeout:
+                return true
+            default:
+                return false
+            }
+        }
+
+        let code = (error as NSError).code
+        return [
+            NSURLErrorTimedOut,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorResourceUnavailable
+        ].contains(code)
+    }
+
+    private func finishWithTranscript(_ text: String, generation: UInt) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isCancelled else { return }
-            self.isFinalizing = false
+            guard let self, self.isCurrentSession(generation) else { return }
+            self.stateLock.withLock { self.isFinalizing = false }
             if !text.isEmpty {
                 self.onTranscript?(text, true)
             }
@@ -319,11 +410,25 @@ public final class SonioxAsyncClient: STTProvider {
         }
     }
 
-    private func finishWithError(_ error: SonioxAsyncError) {
+    private func finishWithError(_ error: SonioxAsyncError, generation: UInt) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isCancelled else { return }
-            self.isFinalizing = false
+            guard let self, self.isCurrentSession(generation) else { return }
+            self.stateLock.withLock { self.isFinalizing = false }
             self.onError?(error.localizedDescription)
         }
+    }
+
+    private func isCurrentSession(_ generation: UInt) -> Bool {
+        stateLock.withLock {
+            sessionGeneration == generation && !isCancelled
+        }
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ body: () -> T) -> T {
+        lock()
+        defer { unlock() }
+        return body()
     }
 }

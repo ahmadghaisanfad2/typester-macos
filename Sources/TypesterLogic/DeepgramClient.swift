@@ -51,6 +51,7 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
 
             let isFinal = json["is_final"] as? Bool ?? false
             let speechFinal = json["speech_final"] as? Bool ?? false
+            let fromFinalize = json["from_finalize"] as? Bool ?? false
 
             Debug.log("Transcript: '\(transcript)' isFinal=\(isFinal) speechFinal=\(speechFinal)")
 
@@ -60,7 +61,16 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
                 results.append(.endpoint)
             }
 
+            if fromFinalize {
+                results.append(.finalizeAcknowledged)
+            }
+
             return results
+        }
+
+        // Deepgram may acknowledge Finalize in a result without a transcript.
+        if json["from_finalize"] as? Bool == true {
+            return [.finalizeAcknowledged]
         }
 
         return []
@@ -69,6 +79,11 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
 
 /// Deepgram speech-to-text client.
 public class DeepgramClient: STTClientBase {
+    private var finalizeWatchdog: DispatchWorkItem?
+    private var awaitingFinalizeAcknowledgement = false
+    private var receivedFinalizeAcknowledgement = false
+    private var didCompleteFinalize = false
+
     public override init() { super.init() }
     override func makeConnectionConfig() -> STTConnectionConfig {
         DeepgramConnectionConfig()
@@ -82,14 +97,70 @@ public class DeepgramClient: STTClientBase {
         }
     }
 
+    public override func connect() {
+        finalizeWatchdog?.cancel()
+        finalizeWatchdog = nil
+        awaitingFinalizeAcknowledgement = false
+        receivedFinalizeAcknowledgement = false
+        didCompleteFinalize = false
+        super.connect()
+    }
+
+    public override func disconnect() {
+        finalizeWatchdog?.cancel()
+        finalizeWatchdog = nil
+        awaitingFinalizeAcknowledgement = false
+        receivedFinalizeAcknowledgement = false
+        didCompleteFinalize = false
+        super.disconnect()
+    }
+
     override func finalizeMessage() -> String {
-        return "{\"type\":\"CloseStream\"}"
+        return "{\"type\":\"Finalize\"}"
     }
 
     override func onFinalizeMessageSent() {
-        // Deepgram needs time for final transcripts before signaling finalized
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.onFinalized?()
+        // Finalize flushes audio that is still being processed. Wait for the
+        // provider's from_finalize result before closing the stream.
+        awaitingFinalizeAcknowledgement = true
+        if receivedFinalizeAcknowledgement {
+            receivedFinalizeAcknowledgement = false
+            closeStreamAndFinish()
+            return
+        }
+        finalizeWatchdog?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.awaitingFinalizeAcknowledgement else { return }
+            Debug.log("Deepgram Finalize acknowledgement timed out; closing stream")
+            self.closeStreamAndFinish()
+        }
+        finalizeWatchdog = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: workItem)
+    }
+
+    override func onFinalizeAcknowledged() {
+        receivedFinalizeAcknowledgement = true
+        guard awaitingFinalizeAcknowledgement else { return }
+        receivedFinalizeAcknowledgement = false
+        finalizeWatchdog?.cancel()
+        finalizeWatchdog = nil
+        awaitingFinalizeAcknowledgement = false
+        closeStreamAndFinish()
+    }
+
+    private func closeStreamAndFinish() {
+        guard !didCompleteFinalize else { return }
+        sendMessage("{\"type\":\"CloseStream\"}") { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self, !self.didCompleteFinalize else { return }
+                if let error {
+                    self.didCompleteFinalize = true
+                    self.onError?("Deepgram stream close failed: \(error.localizedDescription)")
+                    return
+                }
+                self.didCompleteFinalize = true
+                self.onFinalized?()
+            }
         }
     }
 }

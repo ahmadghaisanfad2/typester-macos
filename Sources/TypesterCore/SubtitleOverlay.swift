@@ -2,6 +2,13 @@ import Cocoa
 import SwiftUI
 import TypesterCore
 
+enum SubtitlePresentationPhase: Equatable {
+    case hidden
+    case presenting
+    case visible
+    case dismissing
+}
+
 class SubtitleViewModel: ObservableObject {
     @Published var finalText: String = ""
     @Published var interimText: String = ""
@@ -17,8 +24,12 @@ class SubtitleViewModel: ObservableObject {
     @Published var showStreamPreview: Bool = true
     /// True while waiting for the provider to finalize / return the transcript.
     @Published var isProcessing: Bool = false
+    @Published var processingLabel: String = "Transcribing"
     /// True while the pointer is over the pill's interactive area.
     @Published var isHovering: Bool = false
+    /// Window/content lifecycle. Kept separate from recording state so dismissal
+    /// can finish visually before the borderless window is ordered out.
+    @Published var presentationPhase: SubtitlePresentationPhase = .hidden
 
     var displayText: String {
         guard showStreamPreview, !isProcessing else { return "" }
@@ -33,19 +44,34 @@ class SubtitleViewModel: ObservableObject {
         finalText = ""
         interimText = ""
         isProcessing = false
+        processingLabel = "Transcribing"
         isHovering = false
         targetAppName = appName
         targetAppIcon = appIcon
         targetAudioLevel = Self.levelFloor
         showStreamPreview = SettingsStore.shared.showStreamPreview
         isActive = true
+        presentationPhase = .presenting
     }
 
-    func hide() {
+    func present() {
+        presentationPhase = .visible
+    }
+
+    func beginDismissal() {
+        guard presentationPhase != .hidden else { return }
+        isActive = false
+        isHovering = false
+        presentationPhase = .dismissing
+    }
+
+    func finishHide() {
+        presentationPhase = .hidden
         isActive = false
         finalText = ""
         interimText = ""
         isProcessing = false
+        processingLabel = "Transcribing"
         isHovering = false
         targetAppName = ""
         targetAppIcon = nil
@@ -64,8 +90,9 @@ class SubtitleViewModel: ObservableObject {
     }
 
     /// Compact post-stop waiting state (spinner + small label).
-    func showProcessing() {
+    func showProcessing(label: String = "Transcribing") {
         isProcessing = true
+        processingLabel = label
         interimText = ""
     }
 
@@ -134,6 +161,7 @@ private final class WaveformDisplayBox {
 struct SubtitleView: View {
     @ObservedObject var viewModel: SubtitleViewModel
     var onCancel: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
@@ -149,6 +177,39 @@ struct SubtitleView: View {
                 )
             )
             .fixedSize()
+            .opacity(presentationOpacity)
+            .scaleEffect(presentationScale, anchor: .bottom)
+            .offset(y: presentationOffset)
+            .animation(presentationAnimation, value: viewModel.presentationPhase)
+    }
+
+    private var presentationScale: CGFloat {
+        switch viewModel.presentationPhase {
+        case .hidden: return 0.94
+        case .presenting: return 0.88
+        case .visible: return 1
+        case .dismissing: return 0.94
+        }
+    }
+
+    private var presentationOpacity: Double {
+        viewModel.presentationPhase == .visible ? 1 : 0
+    }
+
+    private var presentationOffset: CGFloat {
+        switch viewModel.presentationPhase {
+        case .hidden: return 8
+        case .presenting: return 10
+        case .visible: return 0
+        case .dismissing: return 9
+        }
+    }
+
+    private var presentationAnimation: Animation {
+        if accessibilityReduceMotion {
+            return .easeInOut(duration: 0.16)
+        }
+        return .spring(response: 0.34, dampingFraction: 0.8, blendDuration: 0.08)
     }
 
     private var pillContent: some View {
@@ -207,7 +268,7 @@ struct SubtitleView: View {
                     .colorScheme(.dark)
                     .frame(width: 14, height: 14)
 
-                Text("Transcribing")
+                Text(viewModel.processingLabel)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.75))
                     .tracking(0.2)
@@ -247,25 +308,55 @@ class SubtitleOverlay {
 
     let viewModel = SubtitleViewModel()
     private var window: NSWindow?
+    private var pendingHide: DispatchWorkItem?
+    private let dismissalDuration: TimeInterval = 0.36
     var onCancel: (() -> Void)?
 
     private init() {}
 
     func show(appName: String, appIcon: NSImage?) {
         DispatchQueue.main.async {
+            self.pendingHide?.cancel()
+            self.pendingHide = nil
             self.viewModel.maxCapsuleWidth = self.maxCapsuleWidth()
             self.viewModel.show(appName: appName, appIcon: appIcon)
             self.ensureWindow()
             self.window?.orderFront(nil)
-            // Next runloop: SwiftUI has applied @Published changes before we measure.
-            DispatchQueue.main.async { self.repositionWindow() }
+            // First lay out the compact starting state, then animate to the
+            // resting state on the next runloop. This keeps the shadow and
+            // window frame stable while the pill does its small spring pop.
+            self.repositionWindow()
+            DispatchQueue.main.async {
+                guard self.viewModel.presentationPhase == .presenting else { return }
+                self.viewModel.present()
+                self.repositionWindow()
+            }
         }
     }
 
     func hide() {
-        DispatchQueue.main.async {
-            self.viewModel.hide()
-            self.window?.orderOut(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.window != nil else {
+                self.viewModel.finishHide()
+                return
+            }
+
+            self.pendingHide?.cancel()
+            self.viewModel.beginDismissal()
+            self.repositionWindow()
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.viewModel.finishHide()
+                self.window?.orderOut(nil)
+                self.pendingHide = nil
+            }
+            self.pendingHide = workItem
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + self.dismissalDuration,
+                execute: workItem
+            )
         }
     }
 
@@ -285,11 +376,15 @@ class SubtitleOverlay {
         }
     }
 
-    func showProcessing() {
+    func showProcessing(label: String = "Transcribing") {
         DispatchQueue.main.async {
-            self.viewModel.showProcessing()
+            self.viewModel.showProcessing(label: label)
             DispatchQueue.main.async { self.repositionWindow() }
         }
+    }
+
+    func showReconnecting() {
+        showProcessing(label: "Reconnecting…")
     }
 
     func clearProcessing() {

@@ -295,6 +295,44 @@ final class STTResponseParsingTests: XCTestCase {
         XCTAssertEqual(results.count, 0, "Empty transcripts should be ignored")
     }
 
+    func testDeepgramFinalizeAcknowledgementWithTranscript() {
+        let config = DeepgramConnectionConfig()
+        let json: [String: Any] = [
+            "channel": [
+                "alternatives": [
+                    ["transcript": "last words"]
+                ]
+            ],
+            "is_final": true,
+            "speech_final": false,
+            "from_finalize": true
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 2)
+        XCTAssertTrue(results.contains { result in
+            if case .transcript(let text, true) = result { return text == "last words" }
+            return false
+        })
+        XCTAssertTrue(results.contains { result in
+            if case .finalizeAcknowledged = result { return true }
+            return false
+        })
+    }
+
+    func testDeepgramFinalizeAcknowledgementWithoutTranscript() {
+        let config = DeepgramConnectionConfig()
+        let results = config.parseResponse(["from_finalize": true])
+
+        XCTAssertEqual(results.count, 1)
+        if case .finalizeAcknowledged = results[0] {
+            // Pass.
+        } else {
+            XCTFail("Expected Finalize acknowledgement")
+        }
+    }
+
     func testDeepgramNonFinalEmitted() {
         let config = DeepgramConnectionConfig()
         let json: [String: Any] = [
