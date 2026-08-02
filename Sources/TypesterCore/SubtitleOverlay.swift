@@ -152,36 +152,45 @@ struct SubtitleView: View {
     }
 
     private var pillContent: some View {
-        ZStack {
-            regularContent
-                // Keep the regular content in the layout while hovering so the
-                // window does not resize underneath the pointer and flicker.
-                .opacity(viewModel.isHovering ? 0 : 1)
-                .allowsHitTesting(!viewModel.isHovering)
-
-            if viewModel.isHovering {
-                Button {
-                    onCancel?()
-                } label: {
-                    Label("Cancel", systemImage: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+        // Keep the normal content as the sole layout anchor. The cancel action
+        // is an overlay so its label can never change the pill's measured size.
+        regularContent
+            .frame(minHeight: 20)
+            .opacity(viewModel.isHovering ? 0 : 1)
+            .scaleEffect(viewModel.isHovering ? 0.985 : 1)
+            .allowsHitTesting(!viewModel.isHovering)
+            .overlay(cancelButton)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    viewModel.isHovering = isHovering
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel transcription")
-                .help("Cancel transcription")
             }
+    }
+
+    private var cancelButton: some View {
+        Button {
+            onCancel?()
+        } label: {
+            Label("Cancel", systemImage: "xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+                // Horizontal padding keeps the label comfortable without
+                // adding any height to the existing pill content area.
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.white.opacity(0.14), in: Capsule())
         }
-        .frame(minHeight: 20)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-        .onHover { isHovering in
-            viewModel.isHovering = isHovering
-        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .opacity(viewModel.isHovering ? 1 : 0)
+        .scaleEffect(viewModel.isHovering ? 1 : 0.985)
+        .allowsHitTesting(viewModel.isHovering)
+        .accessibilityHidden(!viewModel.isHovering)
+        .accessibilityLabel("Cancel transcription")
+        .help("Cancel transcription")
     }
 
     private var regularContent: some View {
