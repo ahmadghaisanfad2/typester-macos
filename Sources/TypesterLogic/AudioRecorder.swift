@@ -5,7 +5,8 @@ import CoreAudio
 public class AudioRecorder {
     public init() {}
     private var audioEngine: AVAudioEngine?
-    private var isRecording = false
+    private var lifecycle = AudioRecordingLifecycle()
+    private var hasInputTap = false
     private var isPreparingEngine = false
     private var lastLevelEmit: CFAbsoluteTime = 0
 
@@ -56,35 +57,35 @@ public class AudioRecorder {
     }
 
     public func startRecording() {
-        Debug.log("startRecording() called, isRecording=\(isRecording)")
-        guard !isRecording else {
-            Debug.log("startRecording() SKIPPED - already recording")
+        Debug.log("startRecording() called, state=\(lifecycle.state)")
+        guard lifecycle.begin() else {
+            Debug.log("startRecording() SKIPPED - recorder is already active")
             return
         }
 
         requestPermission { [weak self] granted in
             Debug.log("Mic permission: \(granted)")
-            guard granted else {
-                self?.onError?("Microphone permission denied")
+            guard let self, self.lifecycle.resolvePermission(granted: granted) else {
                 return
             }
-            self?.setupAndStart()
+            guard granted else {
+                self.onError?("Microphone permission denied")
+                return
+            }
+            self.setupAndStart()
         }
     }
 
     public func stopRecording() {
-        Debug.log("stopRecording() called, isRecording=\(isRecording)")
-        guard isRecording else {
-            Debug.log("stopRecording() SKIPPED - not recording")
-            return
-        }
+        let wasActive = lifecycle.stop()
+        Debug.log("stopRecording() called, wasActive=\(wasActive)")
+        removeInputTap()
+        guard wasActive else { return }
 
         Debug.log("Stopping audio engine...")
-        audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine?.reset()
         // Keep the engine warm — recreating AVAudioEngine is multi-second when Discord holds audio devices.
-        isRecording = false
         lastLevelEmit = 0
         DispatchQueue.main.async { [weak self] in
             self?.onAudioLevel?(0)
@@ -110,6 +111,7 @@ public class AudioRecorder {
     }
 
     private func setupAndStart() {
+        guard lifecycle.isStarting else { return }
         let audioEngine: AVAudioEngine
         if let existing = self.audioEngine {
             audioEngine = existing
@@ -126,6 +128,10 @@ public class AudioRecorder {
 
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            failStart("The selected microphone has no usable audio format.")
+            return
+        }
 
         let sampleRate = targetSampleRate
         // Target format: mono PCM Int16 at the provider's required rate
@@ -150,6 +156,7 @@ public class AudioRecorder {
         )
         let rateRatio = sampleRate / max(inputFormat.sampleRate, 1)
 
+        removeInputTap()
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
@@ -183,16 +190,31 @@ public class AudioRecorder {
                 self.onAudioBuffer?(data)
             }
         }
+        hasInputTap = true
 
         do {
             Debug.log("Starting audio engine...")
             try audioEngine.start()
-            isRecording = true
+            lifecycle.finishStarting()
             Debug.log("Audio engine started successfully")
         } catch {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
-            onError?("Failed to start audio engine: \(error.localizedDescription)")
+            failStart("Failed to start audio engine: \(error.localizedDescription)")
         }
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
+
+    private func failStart(_ message: String) {
+        removeInputTap()
+        audioEngine?.stop()
+        audioEngine?.reset()
+        lifecycle.failStarting()
+        onError?(message)
     }
 
     private func emitAudioLevel(from buffer: AVAudioPCMBuffer) {
