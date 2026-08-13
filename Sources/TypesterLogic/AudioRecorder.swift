@@ -3,12 +3,30 @@ import Cocoa
 import CoreAudio
 
 public class AudioRecorder {
-    public init() {}
+    public init() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.invalidateEngine()
+        }
+        workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.invalidateEngine()
+        }
+    }
+
     private var audioEngine: AVAudioEngine?
     private var lifecycle = AudioRecordingLifecycle()
     private var hasInputTap = false
     private var isPreparingEngine = false
     private var lastLevelEmit: CFAbsoluteTime = 0
+    private var configChangeObserver: NSObjectProtocol?
 
     /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram, 24 kHz OpenAI).
     public var targetSampleRate: Double = 16_000
@@ -49,9 +67,7 @@ public class AudioRecorder {
             guard let self else { return }
             guard self.audioEngine == nil, !self.isPreparingEngine else { return }
             self.isPreparingEngine = true
-            let engine = AVAudioEngine()
-            _ = engine.inputNode.outputFormat(forBus: 0)
-            self.audioEngine = engine
+            _ = self.makeEngine()
             self.isPreparingEngine = false
         }
     }
@@ -112,23 +128,21 @@ public class AudioRecorder {
 
     private func setupAndStart() {
         guard lifecycle.isStarting else { return }
-        let audioEngine: AVAudioEngine
-        if let existing = self.audioEngine {
-            audioEngine = existing
-        } else {
-            audioEngine = AVAudioEngine()
-            self.audioEngine = audioEngine
+        var audioEngine = makeEngine()
+        applySelectedMicrophone(to: audioEngine)
+
+        var inputNode = audioEngine.inputNode
+        var inputFormat = inputNode.outputFormat(forBus: 0)
+        if !Self.isValidInputFormat(inputFormat) {
+            Debug.log("Input format invalid (sr=\(inputFormat.sampleRate) ch=\(inputFormat.channelCount)); recreating engine")
+            discardEngine()
+            audioEngine = makeEngine()
+            applySelectedMicrophone(to: audioEngine)
+            inputNode = audioEngine.inputNode
+            inputFormat = inputNode.outputFormat(forBus: 0)
         }
 
-        // Set selected microphone if specified
-        if let micIDString = SettingsStore.shared.selectedMicrophoneID,
-           let micID = AudioDeviceID(micIDString) {
-            setInputDevice(micID, for: audioEngine)
-        }
-
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+        guard Self.isValidInputFormat(inputFormat) else {
             failStart("The selected microphone has no usable audio format.")
             return
         }
@@ -201,6 +215,60 @@ public class AudioRecorder {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
             failStart("Failed to start audio engine: \(error.localizedDescription)")
         }
+    }
+
+    private func applySelectedMicrophone(to engine: AVAudioEngine) {
+        if let micIDString = SettingsStore.shared.selectedMicrophoneID,
+           let micID = AudioDeviceID(micIDString) {
+            setInputDevice(micID, for: engine)
+        }
+    }
+
+    private func makeEngine() -> AVAudioEngine {
+        if let existing = audioEngine {
+            return existing
+        }
+        let engine = AVAudioEngine()
+        audioEngine = engine
+        observeConfigurationChanges(on: engine)
+        return engine
+    }
+
+    /// Drop the kept-warm engine after sleep or hardware changes so the next
+    /// dictate press builds a fresh graph instead of calling installTap on a dead one.
+    private func invalidateEngine() {
+        let wasActive = lifecycle.state != .idle
+        discardEngine()
+        lastLevelEmit = 0
+        guard wasActive else { return }
+        lifecycle.stop()
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioLevel?(0)
+            self?.onError?("Microphone configuration changed")
+        }
+    }
+
+    private func discardEngine() {
+        hasInputTap = false
+        audioEngine?.stop()
+        audioEngine = nil
+    }
+
+    private func observeConfigurationChanges(on engine: AVAudioEngine) {
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.invalidateEngine()
+        }
+    }
+
+    private static func isValidInputFormat(_ format: AVAudioFormat) -> Bool {
+        format.sampleRate >= 1 && format.channelCount >= 1
     }
 
     private func removeInputTap() {
