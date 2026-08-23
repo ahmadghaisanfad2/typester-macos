@@ -166,7 +166,7 @@ struct SettingsView: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plainFocusless)
         .padding(.horizontal, 8)
     }
 
@@ -205,6 +205,13 @@ struct SettingsView: View {
         SettingsSection("General") {
             SettingsRow("Open at login", help: "Start Typester automatically when you sign in.") {
                 Toggle("", isOn: $settings.launchAtLogin)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Codex.green)
+            }
+
+            SettingsRow("Show in Dock", help: "Keep the Typester icon in the Dock. Turn off to run from the menu bar only.") {
+                Toggle("", isOn: $settings.showInDock)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(Codex.green)
@@ -598,7 +605,7 @@ struct SettingsView: View {
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plainFocusless)
         .help("Remove")
     }
 
@@ -827,7 +834,7 @@ struct SettingsView: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plainFocusless)
                 .help(showKey.wrappedValue ? "Hide key" : "Show key")
 
                 if savedKey != nil && key.wrappedValue == savedKey {
@@ -1030,7 +1037,7 @@ struct ShortcutRecorderView: View {
                 .frame(width: 168, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plainFocusless)
             .fieldCard(focused: isRecording)
             .background(
                 ShortcutRecorderHelper(
@@ -1051,7 +1058,7 @@ struct ShortcutRecorderView: View {
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plainFocusless)
                 .help("Reset to triple ⌘")
             }
         }

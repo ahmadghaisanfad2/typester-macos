@@ -176,6 +176,23 @@ extension View {
     }
 }
 
+// MARK: - Focusless button style
+
+/// Label-only button style that draws no keyboard-focus ring. The stock
+/// `.plain` style outlines a button with an accent-colored rectangle whenever
+/// it becomes first responder (e.g. the first sidebar item the moment the
+/// settings window opens), and the rectangle stays until focus moves — it
+/// reads like a selection that is stuck on screen.
+struct FocuslessButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+extension ButtonStyle where Self == FocuslessButtonStyle {
+    static var plainFocusless: FocuslessButtonStyle { FocuslessButtonStyle() }
+}
+
 // MARK: - Segmented control
 
 /// Minimal segmented control: hairline container, active segment lifts onto
@@ -205,7 +222,7 @@ struct CodexSegmented<Option: Hashable>: View {
                             HairlineBorder(cornerRadius: 6, color: isActive ? Codex.hairline : Color.clear)
                         )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plainFocusless)
                 .contentShape(Rectangle())
             }
         }
