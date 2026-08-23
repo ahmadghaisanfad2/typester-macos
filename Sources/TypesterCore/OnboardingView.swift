@@ -46,25 +46,12 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 12) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.blue)
+            header
 
-                Text("Welcome to Typester")
-                    .font(.title.bold())
+            Rectangle()
+                .fill(Color(hex: 0x26272C))
+                .frame(height: 1)
 
-                Text("Dictate text anywhere on your Mac")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 32)
-            .padding(.bottom, 24)
-
-            Divider()
-
-            // Steps
             VStack(spacing: 0) {
                 stepView(
                     number: 1,
@@ -77,7 +64,7 @@ struct OnboardingView: View {
                     providerAndApiKeyContent
                 }
 
-                Divider().padding(.leading, 56)
+                stepDivider
 
                 stepView(
                     number: 2,
@@ -89,7 +76,7 @@ struct OnboardingView: View {
                     microphoneStepContent
                 }
 
-                Divider().padding(.leading, 56)
+                stepDivider
 
                 stepView(
                     number: 3,
@@ -101,48 +88,28 @@ struct OnboardingView: View {
                     accessibilityStepContent
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
 
             if permissionsComplete {
-                Divider()
+                Rectangle()
+                    .fill(Codex.hairline)
+                    .frame(height: 1)
 
                 readyView
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            Divider()
+            Rectangle()
+                .fill(Codex.hairline)
+                .frame(height: 1)
 
-            // Footer
-            HStack {
-                Spacer()
-
-                if permissionsComplete {
-                    Button("Start using Typester") {
-                        onComplete()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                } else if canContinue && currentStep < 3 {
-                    Button("Continue") {
-                        if currentStep == 1 && !apiKeyInput.isEmpty {
-                            switch settings.sttProvider {
-                            case .soniox:
-                                settings.apiKey = apiKeyInput
-                            case .deepgram:
-                                settings.deepgramApiKey = apiKeyInput
-                            case .openai:
-                                settings.openaiApiKey = apiKeyInput
-                            }
-                        }
-                        withAnimation { currentStep += 1 }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding(20)
+            footer
         }
-        .frame(width: 520, height: permissionsComplete ? 620 : 540)
+        .background(Codex.background)
+        .tint(Codex.green)
+        .frame(width: 540)
+        .frame(height: permissionsComplete ? 632 : 592)
         .onAppear {
             checkPermissions()
             loadApiKeyForProvider()
@@ -161,7 +128,52 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step view
+    // MARK: Header
+
+    private var header: some View {
+        VStack(spacing: 10) {
+            ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(Color(hex: 0x26272C))
+                    .frame(width: 46, height: 46)
+                    .overlay(
+                        HairlineBorder(cornerRadius: 11, color: Color(hex: 0x33363D))
+                    )
+
+                Image(systemName: "waveform")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Codex.mist)
+                    .frame(width: 46, height: 46)
+
+                Circle()
+                    .fill(Codex.green)
+                    .frame(width: 9, height: 9)
+                    .overlay(Circle().stroke(Codex.charcoal, lineWidth: 2.5))
+                    .offset(x: 3, y: 3)
+            }
+
+            Text("Welcome to Typester")
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Codex.mist)
+
+            Text("Dictate text anywhere on your Mac")
+                .font(.system(size: 13))
+                .foregroundStyle(Codex.steel)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 34)
+        .padding(.bottom, 24)
+        .background(Codex.charcoal)
+    }
+
+    // MARK: Steps
+
+    private var stepDivider: some View {
+        Rectangle()
+            .fill(Codex.hairline)
+            .frame(height: 1)
+            .padding(.leading, 70)
+    }
 
     @ViewBuilder
     private func stepView<Content: View>(
@@ -173,40 +185,27 @@ struct OnboardingView: View {
         isComplete: Bool,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            // Step indicator
-            ZStack {
-                Circle()
-                    .fill(isComplete ? Color.green : (isActive ? Color.blue : Color.secondary.opacity(0.3)))
-                    .frame(width: 32, height: 32)
-
-                if isComplete {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                } else {
-                    Text("\(number)")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(isActive ? .white : .secondary)
-                }
-            }
+        HStack(alignment: .top, spacing: 14) {
+            stepIndicator(number: number, isActive: isActive, isComplete: isComplete)
+                .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text(title)
-                        .font(.headline)
-                        .foregroundStyle(isActive || isComplete ? .primary : .secondary)
+                        .font(.system(size: 13.5, weight: isActive || isComplete ? .semibold : .semibold))
+                        .foregroundStyle(isActive || isComplete ? Codex.text : Codex.textSecondary)
 
                     if let (linkText, linkURL) = titleLink {
                         Spacer()
                         Link(linkText, destination: linkURL)
-                            .font(.callout)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Codex.azure)
                     }
                 }
 
                 Text(description)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Codex.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if isActive && !isComplete {
@@ -215,7 +214,7 @@ struct OnboardingView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
@@ -227,55 +226,120 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Ready view
+    private func stepIndicator(number: Int, isActive: Bool, isComplete: Bool) -> some View {
+        ZStack {
+            if isComplete {
+                HairlineBorder(cornerRadius: 8, color: Codex.green, lineWidth: 1.3)
+
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Codex.green)
+            } else if isActive {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Codex.charcoal)
+
+                Text(String(format: "%02d", number))
+                    .font(.mono(11, .semibold))
+                    .foregroundStyle(Codex.mist)
+            } else {
+                HairlineBorder(cornerRadius: 8)
+
+                Text(String(format: "%02d", number))
+                    .font(.mono(11, .semibold))
+                    .foregroundStyle(Codex.textTertiary)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .animation(.easeOut(duration: 0.15), value: isComplete)
+    }
+
+    // MARK: Ready
 
     @ViewBuilder
     private var readyView: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 14) {
             ZStack {
-                Circle()
-                    .fill(Color.blue)
-                    .frame(width: 32, height: 32)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Codex.green.opacity(0.12))
 
-                Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
+                Image(systemName: "waveform")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Codex.green)
             }
+            .frame(width: 30, height: 30)
+            .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("You're all set!")
-                    .font(.headline)
+                Text("You're all set")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Codex.text)
 
-                Text("Hold the **Fn** key and speak — your words will appear wherever your cursor is. Release to stop.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text("Hold")
+                    KeyToken(text: "fn")
+                    Text("and speak — your words appear wherever your cursor is. Release to paste.")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Codex.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
     }
 
-    // MARK: - Step content
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack {
+            Spacer()
+
+            if permissionsComplete {
+                Button("Start using Typester") {
+                    onComplete()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            } else if canContinue && currentStep < 3 {
+                Button("Continue") {
+                    if currentStep == 1 && !apiKeyInput.isEmpty {
+                        switch settings.sttProvider {
+                        case .soniox:
+                            settings.apiKey = apiKeyInput
+                        case .deepgram:
+                            settings.deepgramApiKey = apiKeyInput
+                        case .openai:
+                            settings.openaiApiKey = apiKeyInput
+                        }
+                    }
+                    withAnimation { currentStep += 1 }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: Step content
 
     @ViewBuilder
     private var providerAndApiKeyContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Picker("Provider", selection: $settings.sttProvider) {
-                    ForEach(STTProviderType.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
+        VStack(alignment: .leading, spacing: 10) {
+            CodexSegmented(
+                options: STTProviderType.allCases.map {
+                    (label: $0.displayName, value: $0)
+                },
+                selection: $settings.sttProvider
+            )
 
-                SecureField("Paste your API key", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isApiKeyFocused)
-            }
+            SecureField("Paste your API key", text: $apiKeyInput)
+                .textFieldStyle(.plain)
+                .font(.mono(12.5))
+                .fieldCard()
+                .focused($isApiKeyFocused)
 
             if settings.sttProvider == .openai {
                 Picker("Model", selection: $settings.openaiModel) {
@@ -283,6 +347,7 @@ struct OnboardingView: View {
                         Text(model.displayName).tag(model)
                     }
                 }
+                .pickerStyle(.menu)
                 .labelsHidden()
             } else if settings.sttProvider == .soniox {
                 Picker("Mode", selection: $settings.sonioxMode) {
@@ -290,6 +355,7 @@ struct OnboardingView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                .pickerStyle(.menu)
                 .labelsHidden()
             }
         }
@@ -307,7 +373,7 @@ struct OnboardingView: View {
                 }
             }
         }
-        .buttonStyle(.bordered)
+        .controlSize(.regular)
     }
 
     @ViewBuilder
@@ -317,7 +383,6 @@ struct OnboardingView: View {
                 Button("Open System Settings") {
                     TextPaster.openAccessibilitySettings()
                 }
-                .buttonStyle(.bordered)
 
                 Button("Relaunch") {
                     TextPaster.relaunchApp()
@@ -326,13 +391,13 @@ struct OnboardingView: View {
             }
 
             Text("Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Codex.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    // MARK: - Helpers
+    // MARK: Helpers
 
     private func loadApiKeyForProvider() {
         switch settings.sttProvider {

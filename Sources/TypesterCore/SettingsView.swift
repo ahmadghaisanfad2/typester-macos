@@ -4,8 +4,43 @@ import Carbon.HIToolbox
 import AppKit
 import TypesterCore
 
+// MARK: - Sections
+
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general
+    case provider
+    case dictation
+    case dictionary
+    case permissions
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .provider: return "Provider"
+        case .dictation: return "Dictation"
+        case .dictionary: return "Dictionary"
+        case .permissions: return "Permissions"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .provider: return "waveform"
+        case .dictation: return "keyboard"
+        case .dictionary: return "text.book.closed"
+        case .permissions: return "checkmark.shield"
+        }
+    }
+}
+
+// MARK: - Settings
+
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
+    @State private var selectedSection: SettingsPane = .general
     @State private var sonioxKeyInput: String = ""
     @State private var deepgramKeyInput: String = ""
     @State private var openaiKeyInput: String = ""
@@ -19,336 +54,18 @@ struct SettingsView: View {
     @State private var isCheckingUpdate = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section {
-                    Toggle("Open at login", isOn: $settings.launchAtLogin)
-                }
+        HStack(spacing: 0) {
+            sidebar
 
-                Section("Speech-to-text provider") {
-                    Picker("Provider", selection: $settings.sttProvider) {
-                        ForEach(STTProviderType.allCases, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
+            Rectangle()
+                .fill(Codex.hairline)
+                .frame(width: 1)
 
-                    if settings.sttProvider == .openai {
-                        Picker("Model", selection: $settings.openaiModel) {
-                            ForEach(OpenAITranscribeModel.allCases) { model in
-                                Text(model.displayName).tag(model)
-                            }
-                        }
-                        Text(settings.openaiModel.rawValue)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    } else if settings.sttProvider == .soniox {
-                        Picker("Mode", selection: $settings.sonioxMode) {
-                            ForEach(SonioxTranscribeMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        Text(settings.sonioxMode.modelID)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Text(settings.sonioxMode == .realtime
-                             ? "Real-time streams live text while you speak."
-                             : "Async records locally, then transcribes after you stop (no live text).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        LabeledContent("Model") {
-                            Text(settings.sttProvider.modelID)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-
-                if settings.sttProvider == .soniox {
-                    Section {
-                        apiKeyField(
-                            key: $sonioxKeyInput,
-                            showKey: $showSonioxKey,
-                            savedKey: settings.apiKey,
-                            onSave: { settings.apiKey = $0 }
-                        )
-                    } header: {
-                        HStack {
-                            Text("Soniox API key")
-                            Spacer()
-                            Link("Get key", destination: URL(string: "https://soniox.com")!)
-                                .font(.caption)
-                        }
-                    }
-                } else if settings.sttProvider == .deepgram {
-                    Section {
-                        apiKeyField(
-                            key: $deepgramKeyInput,
-                            showKey: $showDeepgramKey,
-                            savedKey: settings.deepgramApiKey,
-                            onSave: { settings.deepgramApiKey = $0 }
-                        )
-                    } header: {
-                        HStack {
-                            Text("Deepgram API key")
-                            Spacer()
-                            Link("Get key", destination: URL(string: "https://console.deepgram.com")!)
-                                .font(.caption)
-                        }
-                    }
-                } else {
-                    Section {
-                        apiKeyField(
-                            key: $openaiKeyInput,
-                            showKey: $showOpenAIKey,
-                            savedKey: settings.openaiApiKey,
-                            onSave: { settings.openaiApiKey = $0 }
-                        )
-                    } header: {
-                        HStack {
-                            Text("OpenAI API key")
-                            Spacer()
-                            Link("Get key", destination: URL(string: "https://platform.openai.com/api-keys")!)
-                                .font(.caption)
-                        }
-                    }
-                }
-
-                Section("Activation") {
-                    Picker("Mode", selection: $settings.activationMode) {
-                        Text("Hotkey (toggle)").tag(ActivationMode.hotkey)
-                        Text("Hold key to speak").tag(ActivationMode.pressToSpeak)
-                    }
-                    .pickerStyle(.radioGroup)
-
-                    if settings.activationMode == .hotkey {
-                        ShortcutRecorderView(
-                            shortcut: Binding(
-                                get: { shortcutDescription },
-                                set: { _ in }
-                            ),
-                            shortcutKeys: Binding(
-                                get: { settings.shortcutKeys },
-                                set: { if let keys = $0 { settings.shortcutKeys = keys } }
-                            )
-                        )
-                    }
-
-                    if settings.activationMode == .pressToSpeak {
-                        Picker("Key", selection: $settings.pressToSpeakKey) {
-                            ForEach(PressToSpeakKey.allCases, id: \.self) { key in
-                                Text(key.displayName).tag(key)
-                            }
-                        }
-                    }
-                }
-
-                Section {
-                    Toggle("Show stream preview", isOn: $settings.showStreamPreview)
-                    Toggle("Play sounds when starting and stopping", isOn: $settings.playDictationSounds)
-                    HStack {
-                        Text("Sound volume")
-                        Slider(value: Binding(
-                            get: { Double(settings.dictationSoundVolume) },
-                            set: { settings.dictationSoundVolume = Float($0) }
-                        ), in: 0...1)
-                        Text("\(Int((settings.dictationSoundVolume * 100).rounded()))%")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
-                    }
-                    .disabled(!settings.playDictationSounds)
-                    Toggle("Paste on pause", isOn: $settings.pasteOnPause)
-                        .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
-                } header: {
-                    Text("Feedback")
-                } footer: {
-                    Text(settings.sttProvider == .soniox && settings.sonioxMode == .async
-                         ? "Paste on pause is unavailable in Soniox Async mode (no live endpoints while recording)."
-                         : "Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected.")
-                        .foregroundStyle(.secondary)
-                }
-
-                if settings.sttProvider == .soniox || settings.sttProvider == .openai {
-                    Section {
-                        TextField("Domain", text: $settings.contextDomain, prompt: Text("e.g. Healthcare, Software"))
-                        TextField("Topic", text: $settings.contextTopic, prompt: Text("e.g. Product standup"))
-                    } header: {
-                        Text("Context")
-                    } footer: {
-                        Text(settings.sttProvider == .openai
-                             ? "Optional domain and topic are sent as transcription context to OpenAI."
-                             : "Optional domain and topic help Soniox bias recognition toward your subject matter.")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Section {
-                        ForEach(settings.dictionaryTerms, id: \.self) { term in
-                            HStack {
-                                Text(term)
-                                    .lineLimit(1)
-
-                                Spacer()
-
-                                Button {
-                                    settings.dictionaryTerms.removeAll { $0 == term }
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.borderless)
-                            }
-                        }
-                    } header: {
-                        HStack {
-                            Text("Dictionary")
-                            Spacer()
-                            Button {
-                                showingAddTerm = true
-                            } label: {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 16))
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    } footer: {
-                        Text("Add domain-specific words, names, or technical terms to improve recognition accuracy.")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if !settings.correctionPairs.isEmpty {
-                        Section {
-                            ForEach(settings.correctionPairs) { pair in
-                                HStack {
-                                    Text("\(pair.wrong) → \(pair.right)")
-                                        .lineLimit(1)
-
-                                    Spacer()
-
-                                    Button {
-                                        settings.removeCorrection(id: pair.id)
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .buttonStyle(.borderless)
-                                }
-                            }
-                        } header: {
-                            Text("Corrections")
-                        } footer: {
-                            Text(settings.sttProvider == .openai
-                                 ? "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent as OpenAI keywords."
-                                 : "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox.")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Permissions") {
-                    HStack {
-                        Circle()
-                            .fill(micPermissionGranted ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
-
-                        Text("Microphone")
-
-                        Spacer()
-
-                        if micPermissionGranted {
-                            Text("Granted").foregroundStyle(.secondary)
-                        } else {
-                            Button("Request") {
-                                requestMicPermission()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Circle()
-                                .fill(accessibilityGranted ? Color.green : Color.orange)
-                                .frame(width: 8, height: 8)
-
-                            Text("Accessibility")
-
-                            Spacer()
-
-                            if accessibilityGranted {
-                                Text("Granted").foregroundStyle(.secondary)
-                            } else {
-                                Button("Open Settings") {
-                                    TextPaster.openAccessibilitySettings()
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-
-                                Button("Relaunch") {
-                                    TextPaster.relaunchApp()
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                            }
-                        }
-
-                        if !accessibilityGranted {
-                            Text("If the toggle is already on, remove Typester from the Accessibility list, add /Applications/Typester.app again, turn it on, then Relaunch. macOS does not apply a new grant until Typester restarts.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-
-            VStack(spacing: 6) {
-                HStack {
-                    Text("Typester \(appVersion)")
-                        .foregroundStyle(.secondary)
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Link("GitHub", destination: URL(string: githubURL)!)
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button {
-                        checkForUpdates()
-                    } label: {
-                        if isCheckingUpdate {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text("Check for Updates")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isCheckingUpdate)
-                }
-
-                if let updateStatus {
-                    Text(updateStatus)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .font(.caption)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            contentPane
         }
-        .frame(width: 500)
-        .frame(minHeight: 620)
+        .background(Codex.background)
+        .tint(Codex.green)
+        .frame(minWidth: 700, minHeight: 520)
         .sheet(isPresented: $showingAddTerm) {
             AddTermView { term in
                 if !settings.dictionaryTerms.contains(term) {
@@ -366,6 +83,10 @@ struct SettingsView: View {
             if let key = settings.openaiApiKey {
                 openaiKeyInput = key
             }
+            if let pane = ProcessInfo.processInfo.environment["TYPESTER_PANE"],
+               let parsed = SettingsPane(rawValue: pane) {
+                selectedSection = parsed
+            }
             checkPermissions()
             settings.syncLaunchAtLoginStatus()
         }
@@ -373,6 +94,618 @@ struct SettingsView: View {
             checkPermissions()
         }
     }
+
+    // MARK: Sidebar
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Codex.charcoal)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Codex.mist)
+                }
+                .frame(width: 30, height: 30)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Typester")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Codex.text)
+                    Text("v\(appVersion)")
+                        .font(.mono(10.5))
+                        .foregroundStyle(Codex.textTertiary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 34)
+            .padding(.bottom, 20)
+
+            ForEach(SettingsPane.allCases) { section in
+                sidebarButton(for: section)
+            }
+
+            Spacer(minLength: 12)
+        }
+        .frame(width: 196)
+        .padding(.bottom, 10)
+        .background(Codex.sidebar)
+    }
+
+    private func sidebarButton(for section: SettingsPane) -> some View {
+        let isActive = selectedSection == section
+        return Button {
+            selectedSection = section
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .frame(width: 17)
+
+                Text(section.title)
+                    .font(.system(size: 13, weight: isActive ? .medium : .regular))
+
+                Spacer()
+
+                if isActive {
+                    Circle()
+                        .fill(Codex.green)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .foregroundStyle(isActive ? Codex.text : Codex.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isActive ? Codex.surface : Color.clear)
+            )
+            .overlay(
+                HairlineBorder(cornerRadius: 7, color: isActive ? Codex.hairline : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+    }
+
+    // MARK: Content pane
+
+    private var contentPane: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    switch selectedSection {
+                    case .general: generalSection
+                    case .provider: providerSection
+                    case .dictation: dictationSection
+                    case .dictionary: dictionarySection
+                    case .permissions: permissionsSection
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 34)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Rectangle()
+                .fill(Codex.hairline)
+                .frame(height: 1)
+
+            statusBar
+        }
+        .background(Codex.background)
+    }
+
+    // MARK: General
+
+    private var generalSection: some View {
+        SettingsSection("General") {
+            SettingsRow("Open at login", help: "Start Typester automatically when you sign in.") {
+                Toggle("", isOn: $settings.launchAtLogin)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Codex.green)
+            }
+
+            SettingsRow("Live preview", help: "Stream interim text in the caption pill while you speak.") {
+                Toggle("", isOn: $settings.showStreamPreview)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Codex.green)
+            }
+
+            SettingsRow("Dictation sounds", help: "Short tones when a dictation starts and stops.") {
+                Toggle("", isOn: $settings.playDictationSounds)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Codex.green)
+            }
+
+            SettingsRow(
+                "Sound volume",
+                showsDivider: false,
+                control: {
+                    HStack(spacing: 8) {
+                        Slider(value: Binding(
+                            get: { Double(settings.dictationSoundVolume) },
+                            set: { settings.dictationSoundVolume = Float($0) }
+                        ), in: 0...1)
+                        .frame(width: 130)
+
+                        Text("\(Int((settings.dictationSoundVolume * 100).rounded()))%")
+                            .font(.mono(11))
+                            .foregroundStyle(Codex.textSecondary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                    .opacity(settings.playDictationSounds ? 1 : 0.45)
+                    .disabled(!settings.playDictationSounds)
+                }
+            )
+        }
+    }
+
+    // MARK: Provider
+
+    private var providerSection: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsSection("Speech-to-text provider") {
+                VStack(alignment: .leading, spacing: 12) {
+                    CodexSegmented(
+                        options: STTProviderType.allCases.map {
+                            (label: $0.displayName, value: $0)
+                        },
+                        selection: $settings.sttProvider
+                    )
+
+                    modelRow
+                }
+                .padding(14)
+            }
+
+            apiKeySection
+        }
+    }
+
+    @ViewBuilder
+    private var modelRow: some View {
+        switch settings.sttProvider {
+        case .openai:
+            HStack {
+                Picker("Model", selection: $settings.openaiModel) {
+                    ForEach(OpenAITranscribeModel.allCases) { model in
+                        Text(model.displayName).tag(model)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+
+                Spacer()
+
+                Text(settings.openaiModel.rawValue)
+                    .font(.mono(11))
+                    .foregroundStyle(Codex.textTertiary)
+            }
+        case .soniox:
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Picker("Mode", selection: $settings.sonioxMode) {
+                        ForEach(SonioxTranscribeMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+
+                    Spacer()
+
+                    Text(settings.sonioxMode.modelID)
+                        .font(.mono(11))
+                        .foregroundStyle(Codex.textTertiary)
+                }
+
+                Text(settings.sonioxMode == .realtime
+                     ? "Real-time streams live text while you speak."
+                     : "Async records locally, then transcribes after you stop (no live text).")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Codex.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .deepgram:
+            HStack {
+                Text("Model")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Codex.textSecondary)
+
+                Spacer()
+
+                Text(settings.sttProvider.modelID)
+                    .font(.mono(11))
+                    .foregroundStyle(Codex.textTertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var apiKeySection: some View {
+        let (input, showKey, savedKey, onSave, link): (Binding<String>, Binding<Bool>, String?, (String?) -> Void, URL) = {
+            switch settings.sttProvider {
+            case .soniox:
+                return ($sonioxKeyInput, $showSonioxKey, settings.apiKey, { settings.apiKey = $0 }, URL(string: "https://soniox.com")!)
+            case .deepgram:
+                return ($deepgramKeyInput, $showDeepgramKey, settings.deepgramApiKey, { settings.deepgramApiKey = $0 }, URL(string: "https://console.deepgram.com")!)
+            case .openai:
+                return ($openaiKeyInput, $showOpenAIKey, settings.openaiApiKey, { settings.openaiApiKey = $0 }, URL(string: "https://platform.openai.com/api-keys")!)
+            }
+        }()
+
+        SettingsSection(
+            "\(settings.sttProvider.displayName) API key",
+            headerLink: ("Get key", link)
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                apiKeyField(key: input, showKey: showKey, savedKey: savedKey, onSave: onSave)
+
+                Text("Stored in your macOS Keychain — never leaves this Mac except to call the provider.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Codex.textTertiary)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 14)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: Dictation
+
+    private var dictationSection: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsSection("Activation") {
+                SettingsRow("Mode") {
+                    CodexSegmented(
+                        options: [
+                            (label: "Hold key", value: ActivationMode.pressToSpeak),
+                            (label: "Hotkey", value: ActivationMode.hotkey)
+                        ],
+                        selection: $settings.activationMode
+                    )
+                    .frame(width: 210)
+                }
+
+                if settings.activationMode == .pressToSpeak {
+                    SettingsRow(
+                        "Push key",
+                        help: "Hold this key and speak; release to paste.",
+                        showsDivider: false
+                    ) {
+                        Picker("Key", selection: $settings.pressToSpeakKey) {
+                            ForEach(PressToSpeakKey.allCases, id: \.self) { key in
+                                Text(key.displayName).tag(key)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(width: 160)
+                    }
+                } else {
+                    SettingsRow(
+                        "Shortcut",
+                        help: "Press to start recording; press again to stop.",
+                        showsDivider: false
+                    ) {
+                        ShortcutRecorderView(
+                            shortcut: Binding(
+                                get: { shortcutDescription },
+                                set: { _ in }
+                            ),
+                            shortcutKeys: Binding(
+                                get: { settings.shortcutKeys },
+                                set: { if let keys = $0 { settings.shortcutKeys = keys } }
+                            )
+                        )
+                    }
+                }
+            }
+
+            SettingsSection(
+                "Transcription",
+                footer: settings.sttProvider == .soniox && settings.sonioxMode == .async
+                    ? "Paste on pause is unavailable in Soniox Async mode (no live endpoints while recording)."
+                    : "Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected."
+            ) {
+                SettingsRow(
+                    "Paste on pause",
+                    help: "Paste each utterance as soon as you pause.",
+                    showsDivider: false
+                ) {
+                    Toggle("", isOn: $settings.pasteOnPause)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
+                        .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
+                        .opacity(settings.sttProvider == .soniox && settings.sonioxMode == .async ? 0.45 : 1)
+                }
+            }
+        }
+    }
+
+    // MARK: Dictionary
+
+    @ViewBuilder
+    private var dictionarySection: some View {
+        if settings.sttProvider == .deepgram {
+            SettingsSection("Dictionary") {
+                HStack(spacing: 10) {
+                    Image(systemName: "info")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Codex.textTertiary)
+                        .frame(width: 17)
+
+                    Text("Dictionary hints and context apply to Soniox and OpenAI. Deepgram's multilingual model detects vocabulary on its own.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Codex.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 22) {
+                SettingsSection(
+                    "Context",
+                    footer: settings.sttProvider == .openai
+                        ? "Optional domain and topic are sent as transcription context to OpenAI."
+                        : "Optional domain and topic help Soniox bias recognition toward your subject matter."
+                ) {
+                    SettingsRow("Domain") {
+                        TextField("e.g. Healthcare", text: $settings.contextDomain)
+                            .textFieldStyle(.plain)
+                            .fieldCard()
+                            .frame(width: 240)
+                    }
+
+                    SettingsRow("Topic", showsDivider: false) {
+                        TextField("e.g. Product standup", text: $settings.contextTopic)
+                            .textFieldStyle(.plain)
+                            .fieldCard()
+                            .frame(width: 240)
+                    }
+                }
+
+                SettingsSection(
+                    "Dictionary terms",
+                    footer: "Add domain-specific words, names, or technical terms to improve recognition accuracy."
+                ) {
+                    if settings.dictionaryTerms.isEmpty {
+                        HStack {
+                            Text("No terms yet. Add the names and jargon you dictate often.")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Codex.textTertiary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(14)
+
+                        Rectangle()
+                            .fill(Codex.hairline)
+                            .frame(height: 1)
+                            .padding(.leading, 14)
+                    } else {
+                        ForEach(Array(settings.dictionaryTerms.enumerated()), id: \.element) { index, term in
+                            termRow(term, showsDivider: index < settings.dictionaryTerms.count - 1)
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            showingAddTerm = true
+                        } label: {
+                            Label("Add term", systemImage: "plus")
+                                .font(.system(size: 12))
+                        }
+                        .controlSize(.small)
+                        .padding(.vertical, 10)
+                    }
+                    .padding(.horizontal, 14)
+                }
+
+                if !settings.correctionPairs.isEmpty {
+                    SettingsSection(
+                        "Corrections",
+                        footer: settings.sttProvider == .openai
+                            ? "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent as OpenAI keywords."
+                            : "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox."
+                    ) {
+                        ForEach(Array(settings.correctionPairs.enumerated()), id: \.element.id) { index, pair in
+                            correctionRow(pair, showsDivider: index < settings.correctionPairs.count - 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func termRow(_ term: String, showsDivider: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(term)
+                    .font(.mono(12))
+                    .foregroundStyle(Codex.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer()
+
+                deleteButton {
+                    settings.dictionaryTerms.removeAll { $0 == term }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+
+            if showsDivider {
+                Rectangle()
+                    .fill(Codex.hairline)
+                    .frame(height: 1)
+                    .padding(.leading, 14)
+            }
+        }
+    }
+
+    private func correctionRow(_ pair: CorrectionPair, showsDivider: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(pair.wrong)
+                        .strikethrough(true, color: Codex.textTertiary)
+                        .foregroundStyle(Codex.textTertiary)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Codex.textTertiary)
+                    Text(pair.right)
+                        .foregroundStyle(Codex.text)
+                }
+                .font(.mono(12))
+                .lineLimit(1)
+
+                Spacer()
+
+                deleteButton {
+                    settings.removeCorrection(id: pair.id)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+
+            if showsDivider {
+                Rectangle()
+                    .fill(Codex.hairline)
+                    .frame(height: 1)
+                    .padding(.leading, 14)
+            }
+        }
+    }
+
+    private func deleteButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Codex.textTertiary)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Remove")
+    }
+
+    // MARK: Permissions
+
+    private var permissionsSection: some View {
+        SettingsSection(
+            "Permissions",
+            footer: "Typester records audio locally and streams it to your provider for transcription. Audio never touches any other server."
+        ) {
+            SettingsRow("Microphone", help: "Needed to hear you speak.") {
+                HStack(spacing: 8) {
+                    StatusDot(ok: micPermissionGranted)
+
+                    if micPermissionGranted {
+                        Text("Granted")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Codex.textSecondary)
+                    } else {
+                        Button("Request access") {
+                            requestMicPermission()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            SettingsRow(
+                "Accessibility",
+                help: accessibilityGranted
+                    ? "Needed to paste text into other apps."
+                    : "If the toggle is already on, remove Typester from the Accessibility list, add /Applications/Typester.app again, turn it on, then Relaunch. macOS does not apply a new grant until Typester restarts.",
+                showsDivider: false
+            ) {
+                HStack(spacing: 8) {
+                    StatusDot(ok: accessibilityGranted)
+
+                    if accessibilityGranted {
+                        Text("Granted")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Codex.textSecondary)
+                    } else {
+                        Button("Open System Settings") {
+                            TextPaster.openAccessibilitySettings()
+                        }
+                        .controlSize(.small)
+
+                        Button("Relaunch") {
+                            TextPaster.relaunchApp()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Status bar
+
+    private var statusBar: some View {
+        HStack(spacing: 8) {
+            Text("v\(appVersion)")
+                .font(.mono(11))
+                .foregroundStyle(Codex.textTertiary)
+
+            Text("·")
+                .font(.system(size: 11))
+                .foregroundStyle(Codex.textTertiary)
+
+            Link("GitHub", destination: URL(string: githubURL)!)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Codex.azure)
+
+            if let updateStatus {
+                Text("·")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Codex.textTertiary)
+
+                Text(updateStatus)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Codex.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            Button {
+                checkForUpdates()
+            } label: {
+                if isCheckingUpdate {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("Check for Updates")
+                }
+            }
+            .controlSize(.small)
+            .disabled(isCheckingUpdate)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(Codex.sidebar)
+    }
+
+    // MARK: Update checking
 
     private func checkForUpdates() {
         isCheckingUpdate = true
@@ -458,6 +791,8 @@ struct SettingsView: View {
         alert.runModal()
     }
 
+    // MARK: Permissions
+
     private func checkPermissions() {
         checkMicPermission()
         accessibilityGranted = TextPaster.checkAccessibilityPermission()
@@ -470,7 +805,7 @@ struct SettingsView: View {
         savedKey: String?,
         onSave: @escaping (String?) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 ZStack {
                     if showKey.wrappedValue {
@@ -478,30 +813,40 @@ struct SettingsView: View {
                     } else {
                         SecureField("", text: key)
                             .textFieldStyle(.plain)
+                            .font(.mono(12.5))
                     }
                 }
+                .fieldCard()
 
                 Button {
                     showKey.wrappedValue.toggle()
                 } label: {
                     Image(systemName: showKey.wrappedValue ? "eye.slash" : "eye")
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Codex.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .help(showKey.wrappedValue ? "Hide key" : "Show key")
 
                 if savedKey != nil && key.wrappedValue == savedKey {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Codex.green)
+                        .help("Saved to Keychain")
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
 
             if key.wrappedValue != (savedKey ?? "") {
-                HStack {
+                HStack(spacing: 8) {
                     Spacer()
+
                     Button("Cancel") {
                         key.wrappedValue = savedKey ?? ""
                     }
-                    .buttonStyle(.bordered)
                     .controlSize(.small)
 
                     Button("Save") {
@@ -510,6 +855,7 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
+                .padding(.horizontal, 14)
             }
         }
     }
@@ -539,6 +885,8 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Mono key input
+
 private struct SingleLineTextField: NSViewRepresentable {
     @Binding var text: String
 
@@ -554,7 +902,9 @@ private struct SingleLineTextField: NSViewRepresentable {
             cell.isScrollable = true
             cell.lineBreakMode = .byTruncatingHead
         }
-        textField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textField.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
+        textField.textColor = .labelColor
+        textField.placeholderString = "sk-…"
         textField.delegate = context.coordinator
         return textField
     }
@@ -583,45 +933,69 @@ private struct SingleLineTextField: NSViewRepresentable {
     }
 }
 
-// MARK: - Add term view
+// MARK: - Add term
 
 struct AddTermView: View {
     let onSave: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var term: String = ""
+    @FocusState private var focused: Bool
+
+    private var trimmed: String {
+        term.trimmingCharacters(in: .whitespaces)
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading) {
-                TextField("Word or phrase", text: $term)
-                    .textFieldStyle(.roundedBorder)
-            }
-            .padding()
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Add term")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Codex.text)
 
-            Divider()
+                TextField("Word or phrase", text: $term)
+                    .textFieldStyle(.plain)
+                    .font(.mono(12.5))
+                    .fieldCard(focused: focused)
+                    .focused($focused)
+                    .onSubmit(save)
+            }
+            .padding(16)
+
+            Rectangle()
+                .fill(Codex.hairline)
+                .frame(height: 1)
 
             HStack {
+                Spacer()
+
                 Button("Cancel") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Spacer()
-
                 Button("Add") {
-                    let trimmed = term.trimmingCharacters(in: .whitespaces)
-                    if !trimmed.isEmpty {
-                        onSave(trimmed)
-                    }
-                    dismiss()
+                    save()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty)
+                .buttonStyle(.borderedProminent)
+                .disabled(trimmed.isEmpty)
             }
-            .padding()
+            .padding(12)
         }
-        .frame(width: 300, height: 120)
+        .frame(width: 320)
+        .background(Codex.background)
+        .tint(Codex.green)
+        .onAppear {
+            focused = true
+        }
+    }
+
+    private func save() {
+        if !trimmed.isEmpty {
+            onSave(trimmed)
+        }
+        dismiss()
     }
 }
 
@@ -633,26 +1007,31 @@ struct ShortcutRecorderView: View {
     @State private var isRecording = false
 
     var body: some View {
-        HStack {
-            Text("Shortcut")
-
-            Spacer()
-
+        HStack(spacing: 6) {
             Button {
                 isRecording.toggle()
             } label: {
-                if isRecording {
-                    Text("Press keys...")
-                        .foregroundStyle(.orange)
-                } else if shortcut.isEmpty {
-                    Text("Click to record")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(shortcut)
-                        .font(.system(.body, design: .monospaced))
+                HStack(spacing: 8) {
+                    if isRecording {
+                        Circle()
+                            .fill(Color(hex: 0xD99431))
+                            .frame(width: 6, height: 6)
+                        Text("Press keys…")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Codex.textSecondary)
+                    } else if shortcut.isEmpty {
+                        Text("Record shortcut")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Codex.textSecondary)
+                    } else {
+                        KeyToken(text: shortcut)
+                    }
                 }
+                .frame(width: 168, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .fieldCard(focused: isRecording)
             .background(
                 ShortcutRecorderHelper(
                     isRecording: $isRecording,
@@ -666,10 +1045,14 @@ struct ShortcutRecorderView: View {
                     shortcut = ""
                     shortcutKeys = .defaultTripleCmd
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Codex.textTertiary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .help("Reset to triple ⌘")
             }
         }
     }

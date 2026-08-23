@@ -18,7 +18,11 @@ public class AudioRecorder {
     public var onAudioBuffer: ((Data) -> Void)?
     /// Normalized mic level in 0...1, called on the main queue (~60 Hz).
     public var onAudioLevel: ((Float) -> Void)?
+    /// Log-spaced speech band levels in 0...1, called on the main queue (~60 Hz).
+    public var onSpectrum: (([Float]) -> Void)?
     public var onError: ((String) -> Void)?
+
+    private let spectrumAnalyzer = SpectrumAnalyzer()
 
     // MARK: - Permission
 
@@ -87,8 +91,10 @@ public class AudioRecorder {
         audioEngine?.reset()
         // Keep the engine warm — recreating AVAudioEngine is multi-second when Discord holds audio devices.
         lastLevelEmit = 0
+        spectrumAnalyzer.reset()
         DispatchQueue.main.async { [weak self] in
             self?.onAudioLevel?(0)
+            self?.onSpectrum?(Array(repeating: 0, count: self?.spectrumAnalyzer.bandCount ?? 0))
         }
         Debug.log("Audio engine stopped")
     }
@@ -157,10 +163,11 @@ public class AudioRecorder {
         let rateRatio = sampleRate / max(inputFormat.sampleRate, 1)
 
         removeInputTap()
+        spectrumAnalyzer.reset()
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
-            self.emitAudioLevel(from: buffer)
+            self.emitAnalysis(from: buffer)
 
             // Capacity must follow the delivered frameLength (not the requested buffer hint).
             let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * rateRatio) + 64
@@ -217,16 +224,24 @@ public class AudioRecorder {
         onError?(message)
     }
 
-    private func emitAudioLevel(from buffer: AVAudioPCMBuffer) {
-        guard onAudioLevel != nil else { return }
+    private func emitAnalysis(from buffer: AVAudioPCMBuffer) {
+        guard onAudioLevel != nil || onSpectrum != nil else { return }
 
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastLevelEmit >= 1.0 / 60.0 else { return }
         lastLevelEmit = now
 
         let level = Self.normalizedLevel(from: buffer)
+        if onSpectrum != nil, let floatData = buffer.floatChannelData?[0] {
+            spectrumAnalyzer.appendSamples(floatData, count: Int(buffer.frameLength))
+        }
+        let bands = onSpectrum != nil
+            ? spectrumAnalyzer.bandLevels(sampleRate: Float(buffer.format.sampleRate))
+            : []
+
         DispatchQueue.main.async { [weak self] in
             self?.onAudioLevel?(level)
+            self?.onSpectrum?(bands)
         }
     }
 

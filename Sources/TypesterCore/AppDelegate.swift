@@ -95,6 +95,106 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             updateMonitoringMode()
         }
+
+        applyDebugOverrides()
+    }
+
+    // MARK: - Demo overrides (screenshot/verification aid)
+
+    /// Environment-driven hooks used for automated visual checks:
+    /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
+    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting,
+    /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png.
+    private func applyDebugOverrides() {
+        let env = ProcessInfo.processInfo.environment
+
+        if let appearance = env["TYPESTER_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        }
+        if let fake = env["TYPESTER_FAKE_TRANSCRIPT"], !fake.isEmpty {
+            lastTranscript = fake
+        }
+
+        let snapshotPath = env["TYPESTER_SNAPSHOT"]
+        switch env["TYPESTER_DEMO"] {
+        case "settings":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.openSettings()
+                if let snapshotPath { self.scheduleSnapshot(of: \.settingsWindow, to: snapshotPath) }
+            }
+        case "onboarding":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.showOnboarding()
+                if let snapshotPath { self.scheduleSnapshot(of: \.onboardingWindow, to: snapshotPath) }
+            }
+        case "teach":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.openTeachDictionary()
+                if let snapshotPath { self.scheduleSnapshot(of: \.teachWindow, to: snapshotPath) }
+            }
+        case "pill":
+            let mode = env["TYPESTER_PILL_MODE"] ?? "live"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.demoPill(mode: mode) }
+            if let snapshotPath {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    self.subtitleOverlay.snapshotForDebug(to: snapshotPath)
+                    NSApp.terminate(self)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    /// Renders a demo window's content view to PNG (no screen-recording permission needed).
+    private func scheduleSnapshot(of keyPath: ReferenceWritableKeyPath<AppDelegate, NSWindow?>, to path: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard let window = self[keyPath: keyPath] else { return }
+            Self.snapshot(window: window, to: path)
+            NSApp.terminate(self)
+        }
+    }
+
+    static func snapshot(window: NSWindow, to path: String) {
+        guard let contentView = window.contentView else { return }
+        contentView.layoutSubtreeIfNeeded()
+        let bounds = contentView.bounds
+        guard bounds.width > 1, bounds.height > 1,
+              let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(bounds.width) * 2,
+                pixelsHigh: Int(bounds.height) * 2,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .calibratedRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+              ) else { return }
+        rep.size = bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        contentView.cacheDisplay(in: bounds, to: rep)
+        NSGraphicsContext.restoreGraphicsState()
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+            Debug.log("Snapshot written to \(path)")
+        }
+    }
+
+    private func demoPill(mode: String) {
+        let notesIcon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
+        subtitleOverlay.show(appName: "Notes", appIcon: notesIcon)
+        switch mode {
+        case "processing":
+            subtitleOverlay.showProcessing()
+        case "reconnecting":
+            subtitleOverlay.showReconnecting()
+        default:
+            subtitleOverlay.updateFinal("ship the ")
+            subtitleOverlay.updateInterim("release candidate tomorrow")
+        }
     }
 
     private func setupPasteSuppression() {
@@ -717,11 +817,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(teachItem)
 
         let settingsItem = NSMenuItem(
-            title: "Settings...",
+            title: "Settings…",
             action: #selector(openSettings),
-            keyEquivalent: ""
+            keyEquivalent: ","
         )
         settingsItem.target = self
+        settingsItem.keyEquivalentModifierMask = .command
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
@@ -1286,8 +1387,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.sttProvider.sendAudio(data)
         }
 
-        audioRecorder.onAudioLevel = { [weak self] level in
-            self?.subtitleOverlay.updateAudioLevel(level)
+        audioRecorder.onSpectrum = { [weak self] bands in
+            self?.subtitleOverlay.updateSpectrum(bands)
         }
 
         audioRecorder.onError = { [weak self] _ in
@@ -1486,9 +1587,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             let hostingController = NSHostingController(rootView: SettingsView())
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .resizable]
-            window.minSize = NSSize(width: 580, height: 500)
+            window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.minSize = NSSize(width: 700, height: 520)
+            window.setContentSize(NSSize(width: 740, height: 600))
             window.center()
             window.setFrameAutosaveName("SettingsWindow")
             window.delegate = self
@@ -1549,6 +1652,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // App menu
         let appMenu = NSMenu()
+        let settingsMenuItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsMenuItem.target = self
+        appMenu.addItem(settingsMenuItem)
         appMenu.addItem(NSMenuItem(title: "Quit Typester", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         let appMenuItem = NSMenuItem()
         appMenuItem.submenu = appMenu
@@ -1594,8 +1700,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let hostingController = NSHostingController(rootView: onboardingView)
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Welcome to Typester"
-            window.styleMask = [.titled, .closable]
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.center()
             window.delegate = self
             onboardingWindow = window
