@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @State private var currentStep = 1
     @State private var micGranted = false
     @State private var accessibilityGranted = false
+    @State private var micPromptShown = false
     @FocusState private var isApiKeyFocused: Bool
 
     var onComplete: () -> Void
@@ -119,6 +120,21 @@ struct OnboardingView: View {
         }
         .onChange(of: settings.sttProvider) { _ in
             loadApiKeyForProvider()
+        }
+        .onChange(of: currentStep) { step in
+            // Auto-trigger the mic permission prompt when the user reaches
+            // step 2, once per onboarding session (no nagging if denied).
+            if step == 2 && !micPromptShown && micGranted == false {
+                micPromptShown = true
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    DispatchQueue.main.async {
+                        micGranted = granted
+                        if granted {
+                            withAnimation { currentStep = 3 }
+                        }
+                    }
+                }
+            }
         }
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             checkPermissions()
@@ -379,7 +395,9 @@ struct OnboardingView: View {
     @ViewBuilder
     private var accessibilityStepContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            HStack(spacing: 14) {
+                draggableAppIcon
+
                 Button("Open System Settings") {
                     TextPaster.openAccessibilitySettings()
                 }
@@ -390,11 +408,48 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Text("Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
+            Text(runsFromAppBundle
+                 ? "Drag the Typester icon into the list in System Settings. That's it — no plus button, no file picker."
+                 : "Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Codex.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: Drag-to-grant (Accessibility)
+
+    /// True when running from a real .app bundle (a bare `swift run` binary
+    /// has no bundle URL worth dragging).
+    private var runsFromAppBundle: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    /// The classic "drag me into System Settings" pattern: the tile carries the
+    /// app bundle URL as drag payload, so dropping it on the Accessibility list
+    /// adds Typester directly.
+    private var draggableAppIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Codex.charcoal)
+
+            if runsFromAppBundle {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 36, height: 36)
+            } else {
+                Image(systemName: "waveform")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Codex.mist)
+            }
+        }
+        .frame(width: 46, height: 46)
+        .overlay(HairlineBorder(cornerRadius: 10, color: Color(hex: 0x33363D)))
+        .opacity(runsFromAppBundle ? 1 : 0.5)
+        .onDrag {
+            NSItemProvider(object: Bundle.main.bundleURL as NSURL)
+        }
+        .help("Drag me into the Accessibility list")
     }
 
     // MARK: Helpers

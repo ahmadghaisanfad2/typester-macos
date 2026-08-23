@@ -285,6 +285,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setupMainMenu()
         }
         NSApp.setActivationPolicy(desired)
+        // Reapply the icon after the policy flip: promoting an LSUIElement
+        // process to .regular can leave the Dock tile rendering blank unless
+        // the icon image is (re)set afterwards.
+        if desired == .regular {
+            setAppIcon()
+        }
     }
 
     private func updateSTTProvider() {
@@ -1735,6 +1741,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Menu bar apps need .regular policy for text input to work
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
+            // Reapply the icon after promoting, or the Dock tile renders blank.
+            setAppIcon()
         }
 
         window.level = .floating
@@ -1780,11 +1788,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             teachWindow = nil
         }
 
-        // Reset to accessory policy when settings/onboarding/teach closes (menu bar app behavior)
+        // Reset to accessory policy when settings/onboarding/teach closes
+        // (menu bar app behavior). The closing window itself still reports
+        // isVisible == true inside willClose, so it must be excluded or the
+        // Dock icon never hides.
+        let closingWindow = notification.object as? NSWindow
         let remainingWindows = [settingsWindow, onboardingWindow, teachWindow].compactMap { $0 }
-        let stillOpen = remainingWindows.contains { $0.isVisible }
+        let stillOpen = remainingWindows.contains { $0.isVisible && $0 !== closingWindow }
         if !stillOpen {
-            updateActivationPolicy()
+            DispatchQueue.main.async { [weak self] in
+                self?.updateActivationPolicy()
+            }
         }
     }
 
