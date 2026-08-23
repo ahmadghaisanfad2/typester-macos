@@ -93,6 +93,16 @@ struct SettingsView: View {
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             checkPermissions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .updateCheckRequested)) { _ in
+            checkForUpdates()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .updateInstallRequested)) { _ in
+            if let pending = AppUpdater.shared.pending {
+                confirmInstall(latest: pending.latest, dmgURL: pending.dmgURL, current: appVersion)
+            } else {
+                checkForUpdates()
+            }
+        }
     }
 
     // MARK: Sidebar
@@ -735,18 +745,8 @@ struct SettingsView: View {
 
         case .updateAvailable(let current, let latest, let dmgURL, _):
             updateStatus = "Update \(latest) available."
-            let alert = NSAlert()
-            alert.messageText = "Update available"
-            alert.informativeText = "Typester \(latest) is available (you have \(current)). Download the DMG now?"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "Download")
-            alert.addButton(withTitle: "Cancel")
-            let response = alert.runModal()
-            guard response == .alertFirstButtonReturn else {
-                updateStatus = "Update \(latest) available — download cancelled."
-                return
-            }
-            downloadUpdate(from: dmgURL, latest: latest)
+            AppUpdater.shared.pending = PendingUpdate(latest: latest, dmgURL: dmgURL)
+            confirmInstall(latest: latest, dmgURL: dmgURL, current: current)
 
         case .noRelease:
             updateStatus = "No releases found on GitHub yet."
@@ -768,25 +768,58 @@ struct SettingsView: View {
         }
     }
 
-    private func downloadUpdate(from url: URL, latest: String) {
-        isCheckingUpdate = true
-        updateStatus = "Downloading Typester \(latest)…"
-
-        UpdateChecker.shared.downloadDMG(from: url) { result in
-            isCheckingUpdate = false
-            switch result {
-            case .success(let fileURL):
-                updateStatus = "Downloaded \(fileURL.lastPathComponent)."
-                UpdateChecker.shared.openDownloadedDMG(fileURL)
-                presentAlert(
-                    title: "Download complete",
-                    message: "Saved to \(fileURL.path).\n\nOpen the DMG and drag Typester to Applications to finish updating."
-                )
-            case .failure(let error):
-                updateStatus = "Download failed."
-                presentAlert(title: "Download failed", message: error.localizedDescription)
+    /// In-app update: download, replace the running app, relaunch. Permissions
+    /// and settings carry over because every build shares one signing identity.
+    private func confirmInstall(latest: String, dmgURL: URL, current: String) {
+        guard AppUpdater.shared.isUpdateSupportedForCurrentInstall() else {
+            updateStatus = "Update \(latest) available — manual install needed."
+            let alert = NSAlert()
+            alert.messageText = "Update available"
+            alert.informativeText = "Typester \(latest) is available (you have \(current)), but Typester is running from a folder it cannot update in place. Download the DMG and move Typester to /Applications."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Open Release Page")
+            alert.addButton(withTitle: "OK")
+            if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: githubReleasesPageURL) {
+                NSWorkspace.shared.open(url)
             }
+            return
         }
+
+        let alert = NSAlert()
+        alert.messageText = "Update to Typester \(latest)?"
+        alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. Your settings, API keys, and permissions are kept — no re-granting Accessibility needed."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Update Now")
+        alert.addButton(withTitle: "Later")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            updateStatus = "Update \(latest) available — postponed."
+            return
+        }
+        installUpdate(from: dmgURL, latest: latest)
+    }
+
+    private func installUpdate(from url: URL, latest: String) {
+        isCheckingUpdate = true
+        updateStatus = "Downloading update…"
+        AppUpdater.shared.install(
+            from: url,
+            status: { text in
+                updateStatus = text
+            },
+            completion: { result in
+                isCheckingUpdate = false
+                switch result {
+                case .success:
+                    updateStatus = "Update \(latest) installed — relaunching…"
+                case .failure(let error):
+                    updateStatus = "Update failed."
+                    presentAlert(
+                        title: "Update failed",
+                        message: error.localizedDescription + "\n\nYou can also install manually from the releases page."
+                    )
+                }
+            }
+        )
     }
 
     private func presentAlert(title: String, message: String) {

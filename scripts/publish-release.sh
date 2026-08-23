@@ -64,6 +64,12 @@ Local release built with \`scripts/build-release.sh\` and published with \`scrip
 1. Download \`Typester-${VERSION}.dmg\`
 2. Open the DMG and drag Typester to Applications
 3. If Gatekeeper blocks an unsigned build: Right-click → Open
+
+### Updating
+Already running Typester 1.15.0 or newer? Update from the app itself — menu bar
+icon → Check for Updates… (or Settings → Check for Updates). The update installs
+in place and relaunches; Accessibility/microphone permissions and API keys are
+kept automatically.
 EOF
 
 if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then

@@ -50,6 +50,15 @@ Typester requires two macOS permissions:
 4. Follow the setup wizard to choose your provider and enter your API key
 5. Grant Microphone and Accessibility permissions when prompted
 
+### Updating
+
+From 1.15.0 onward, Typester updates itself: menu bar icon → **Check for Updates…**
+(or Settings → Check for Updates). The update downloads, installs in place, and
+relaunches — Accessibility/microphone permissions and API keys are kept, because
+every build is signed with the same stable identity
+(`scripts/setup-signing.sh` creates it once per machine; releases fall back to
+ad-hoc signing without it, which resets permissions on every update).
+
 ## Usage
 
 **Press-to-speak mode (default):**

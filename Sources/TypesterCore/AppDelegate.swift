@@ -97,7 +97,27 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         updateActivationPolicy()
+
+        // Silent background check for a newer GitHub release (throttled).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            self?.autoCheckForUpdates()
+        }
+
         applyDebugOverrides()
+    }
+
+    private func autoCheckForUpdates() {
+        guard UpdateCheckSchedule.shouldAutoCheck(lastCheck: UpdateCheckSchedule.lastCheck()) else {
+            return
+        }
+        UpdateCheckSchedule.recordCheck()
+        UpdateChecker.shared.checkForUpdates { outcome in
+            guard case .updateAvailable(_, let latest, let dmgURL, _) = outcome else { return }
+            Debug.log("Background update check found \(latest)")
+            AppUpdater.shared.pending = PendingUpdate(latest: latest, dmgURL: dmgURL)
+            self.rebuildMenu()
+            NotificationCenter.default.post(name: .updateDiscovered, object: nil)
+        }
     }
 
     // MARK: - Demo overrides (screenshot/verification aid)
@@ -105,7 +125,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Environment-driven hooks used for automated visual checks:
     /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
     /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting,
-    /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png.
+    /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png,
+    /// TYPESTER_INSTALL_UPDATE=/path/to/Typester-x.y.z.dmg (self-update E2E test).
     private func applyDebugOverrides() {
         let env = ProcessInfo.processInfo.environment
 
@@ -114,6 +135,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if let fake = env["TYPESTER_FAKE_TRANSCRIPT"], !fake.isEmpty {
             lastTranscript = fake
+        }
+
+        if let dmgPath = env["TYPESTER_INSTALL_UPDATE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                Debug.log("TYPESTER_INSTALL_UPDATE: installing from \(dmgPath)")
+                AppUpdater.shared.install(
+                    from: URL(fileURLWithPath: dmgPath),
+                    status: { Debug.log("update: \($0)") },
+                    completion: { result in
+                        if case .failure(let error) = result {
+                            Debug.log("TYPESTER_INSTALL_UPDATE failed: \(error.localizedDescription)")
+                        }
+                    }
+                )
+            }
         }
 
         let snapshotPath = env["TYPESTER_SNAPSHOT"]
@@ -833,6 +869,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         teachItem.target = self
         teachItem.isEnabled = !lastTranscript.isEmpty
         menu.addItem(teachItem)
+
+        if let pending = AppUpdater.shared.pending {
+            let updateItem = NSMenuItem(
+                title: "Update to \(pending.latest)…",
+                action: #selector(installUpdateFromMenu),
+                keyEquivalent: ""
+            )
+            updateItem.target = self
+            menu.addItem(updateItem)
+        }
+
+        let checkItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdatesFromMenu),
+            keyEquivalent: ""
+        )
+        checkItem.target = self
+        menu.addItem(checkItem)
 
         let settingsItem = NSMenuItem(
             title: "Settings…",
@@ -1597,6 +1651,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let modifiers = NSEvent.ModifierFlags(rawValue: keys.modifiers)
         return KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keys.keyCode)
+    }
+
+    @objc private func installUpdateFromMenu() {
+        openSettings()
+        // Give the Settings window a runloop tick to attach its observers.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            NotificationCenter.default.post(name: .updateInstallRequested, object: nil)
+        }
+    }
+
+    @objc private func checkForUpdatesFromMenu() {
+        openSettings()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            NotificationCenter.default.post(name: .updateCheckRequested, object: nil)
+        }
     }
 
     // MARK: - Settings
