@@ -5,7 +5,7 @@ set -e
 APP_NAME="Typester"
 BUNDLE_ID="com.typester.app"
 TEAM_ID="R892A93W42"
-VERSION="1.14.0"
+VERSION="1.15.0"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,7 +42,9 @@ file "$UNIVERSAL_BIN"
 lipo -info "$UNIVERSAL_BIN" || true
 
 echo "==> Creating app bundle..."
-rm -rf dist
+# Wipe previous output but KEEP dist/signing (stable signing key backups).
+rm -rf "$DMG_STAGING"
+rm -f "$PROJECT_DIR"/dist/Typester-*.dmg
 mkdir -p "$DMG_STAGING"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -100,19 +102,51 @@ EOF
 # stale/adhoc linker identity and AXIsProcessTrusted() stays false after rebuilds.
 ENTITLEMENTS="$PROJECT_DIR/Sources/typester.entitlements"
 
-if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
-    SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+# Signing priority: Developer ID > stable self-signed "Typester Developer" > ad-hoc.
+# The stable identity keeps the code signature's designated requirement identical
+# across builds, so macOS TCC (Accessibility, Microphone) survives app updates.
+STABLE_IDENTITY="Typester Developer"
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/typester-signing.keychain-db"
+KEYCHAIN_PASS_FILE="$PROJECT_DIR/dist/signing/keychain.passphrase"
 
-    echo "==> Signing app with: $SIGNING_IDENTITY"
+SIGNING_MODE="adhoc"
+SIGNING_IDENTITY="-"
+
+if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+    SIGNING_MODE="developer-id"
+    SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+elif [[ -f "$SIGNING_KEYCHAIN" && -f "$KEYCHAIN_PASS_FILE" ]] \
+    && security unlock-keychain -p "$(cat "$KEYCHAIN_PASS_FILE")" "$SIGNING_KEYCHAIN" 2>/dev/null \
+    && security find-identity "$SIGNING_KEYCHAIN" 2>/dev/null | grep -q "\"$STABLE_IDENTITY\""; then
+    SIGNING_MODE="stable"
+    SIGNING_IDENTITY="$STABLE_IDENTITY"
+else
+    echo "==> No Developer ID certificate and no stable signing identity."
+    echo "    Run scripts/setup-signing.sh once so TCC permissions survive updates."
+fi
+
+echo "==> Signing app ($SIGNING_MODE) with: $SIGNING_IDENTITY"
+if [[ "$SIGNING_MODE" == "adhoc" ]]; then
+    codesign --force --deep \
+        --identifier "$BUNDLE_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        --sign - \
+        "$APP_BUNDLE"
+else
     codesign --force --deep --options runtime \
         --identifier "$BUNDLE_ID" \
         --entitlements "$ENTITLEMENTS" \
         --sign "$SIGNING_IDENTITY" \
         "$APP_BUNDLE"
+    codesign --verify --deep --strict "$APP_BUNDLE" \
+        && echo "==> App signature verified. Designated requirement:"
+    codesign -d -r- "$APP_BUNDLE" 2>&1 | grep designated || true
+fi
 
-    echo "==> Creating DMG..."
-    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
+echo "==> Creating DMG..."
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
 
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "==> Signing DMG..."
     codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
 
@@ -124,17 +158,16 @@ if security find-identity -v -p codesigning | grep -q "Developer ID Application"
     echo "To notarize, run:"
     echo "    xcrun notarytool submit \"$DMG_PATH\" --apple-id YOUR_APPLE_ID --team-id $TEAM_ID --password APP_SPECIFIC_PASSWORD --wait"
     echo "    xcrun stapler staple \"$DMG_PATH\""
+elif [[ "$SIGNING_MODE" == "stable" ]]; then
+    echo ""
+    echo "==> Build complete (stable identity: $STABLE_IDENTITY)!"
+    echo "    App: $APP_BUNDLE"
+    echo "    DMG: $DMG_PATH"
+    echo ""
+    echo "Updates installed in-app keep Accessibility/mic permissions because every"
+    echo "build shares the same designated requirement. First install of a downloaded"
+    echo "DMG may still need Right-click -> Open (unsigned/self-signed distribution)."
 else
-    echo "==> No Developer ID certificate; ad-hoc signing with identifier $BUNDLE_ID..."
-    codesign --force --deep \
-        --identifier "$BUNDLE_ID" \
-        --entitlements "$ENTITLEMENTS" \
-        --sign - \
-        "$APP_BUNDLE"
-
-    echo "==> Creating DMG..."
-    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
-
     echo ""
     echo "==> Build complete (ad-hoc signed)!"
     echo "    App: $APP_BUNDLE"
@@ -143,5 +176,5 @@ else
     echo "NOTE: Ad-hoc builds get a new code identity each rebuild. After installing,"
     echo "remove Typester from System Settings → Privacy → Accessibility, re-add"
     echo "/Applications/Typester.app, enable it, then quit and reopen Typester."
-    echo "For distribution, use a Developer ID certificate from developer.apple.com."
+    echo "Run scripts/setup-signing.sh once to stop losing permissions on updates."
 fi
