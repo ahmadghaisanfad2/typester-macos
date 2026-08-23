@@ -1507,10 +1507,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             openSettings()
-        } else {
-            // Reset to accessory policy if not opening settings
-            updateActivationPolicy()
         }
+        // Hand the decision back on every exit path. When openSettings()
+        // presented its window first, updateActivationPolicy() keeps the app
+        // .regular while that window is visible; otherwise it demotes to
+        // .accessory so the Dock icon disappears again.
+        updateActivationPolicy()
     }
 
     // MARK: - Recording control
@@ -1824,17 +1826,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             onboardingWindow = window
         }
 
-        setupMainMenu()
-
-        if NSApp.activationPolicy() != .regular {
-            NSApp.setActivationPolicy(.regular)
-        }
-
-        // Set icon after activation policy change
-        setAppIcon()
-
-        onboardingWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Single promotion path shared with settings/teach: promotes to
+        // .regular, reapplies the Dock icon, and lets windowWillClose hand
+        // the policy decision back to updateActivationPolicy() on close.
+        presentUtilityWindow(onboardingWindow)
     }
 }
 
