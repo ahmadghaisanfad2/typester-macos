@@ -9,6 +9,8 @@ public class AudioRecorder {
     private var hasInputTap = false
     private var isPreparingEngine = false
     private var lastLevelEmit: CFAbsoluteTime = 0
+    private var engineConfigObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram, 24 kHz OpenAI).
     public var targetSampleRate: Double = 16_000
@@ -23,6 +25,80 @@ public class AudioRecorder {
     public var onError: ((String) -> Void)?
 
     private let spectrumAnalyzer = SpectrumAnalyzer()
+
+    // MARK: - Sleep/wake resilience
+
+    /// After macOS sleep/wake the CoreAudio device graph changes underneath a
+    /// cached AVAudioEngine. Starting (or tapping) such an engine is a known
+    /// crash source — the tap renders with a stale hardware format. Tear the
+    /// engine down on wake / configuration change and rebuild it on demand.
+    public func installSleepWakeHandlers() {
+        let center = NSWorkspace.shared.notificationCenter
+        wakeObserver = center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleSystemWake()
+        }
+    }
+
+    deinit {
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        if let engineConfigObserver {
+            NotificationCenter.default.removeObserver(engineConfigObserver)
+        }
+    }
+
+    private func handleSystemWake() {
+        Debug.log("System woke — recycling audio engine")
+        recycleEngine()
+        if lifecycle.state == .recording || lifecycle.state == .starting {
+            // A dictation was interrupted by sleep; restart cleanly so the
+            // very next hotkey press cannot hit a dead engine.
+            lifecycle.stop()
+        }
+        // Pre-warm a fresh engine for the next session.
+        prepareEngine()
+    }
+
+    /// Stops and discards the cached engine. Safe to call from any state.
+    private func recycleEngine() {
+        removeInputTap()
+        if let engine = audioEngine {
+            engine.stop()
+            engine.reset()
+        }
+        if let engineConfigObserver {
+            NotificationCenter.default.removeObserver(engineConfigObserver)
+            self.engineConfigObserver = nil
+        }
+        audioEngine = nil
+    }
+
+    private func observeEngineConfiguration(_ engine: AVAudioEngine) {
+        if let engineConfigObserver {
+            NotificationCenter.default.removeObserver(engineConfigObserver)
+        }
+        engineConfigObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Debug.log("AVAudioEngine configuration changed — recycling engine")
+            let wasRecording = self.lifecycle.state == .recording
+            self.recycleEngine()
+            if wasRecording {
+                self.lifecycle.stop()
+                self.onError?("Microphone was reconfigured — try again")
+            } else {
+                self.prepareEngine()
+            }
+        }
+    }
 
     // MARK: - Permission
 
@@ -56,6 +132,7 @@ public class AudioRecorder {
             let engine = AVAudioEngine()
             _ = engine.inputNode.outputFormat(forBus: 0)
             self.audioEngine = engine
+            self.observeEngineConfiguration(engine)
             self.isPreparingEngine = false
         }
     }
@@ -118,12 +195,15 @@ public class AudioRecorder {
 
     private func setupAndStart() {
         guard lifecycle.isStarting else { return }
+        // A stale engine (created before sleep, or holding a dead device) is a
+        // crash source on start — always rebuild after a configuration change.
         let audioEngine: AVAudioEngine
         if let existing = self.audioEngine {
             audioEngine = existing
         } else {
             audioEngine = AVAudioEngine()
             self.audioEngine = audioEngine
+            observeEngineConfiguration(audioEngine)
         }
 
         // Set selected microphone if specified
@@ -206,6 +286,9 @@ public class AudioRecorder {
             Debug.log("Audio engine started successfully")
         } catch {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
+            // The failed engine is likely poisoned (stale device/format after
+            // wake). Discard it so the next attempt builds a fresh one.
+            recycleEngine()
             failStart("Failed to start audio engine: \(error.localizedDescription)")
         }
     }

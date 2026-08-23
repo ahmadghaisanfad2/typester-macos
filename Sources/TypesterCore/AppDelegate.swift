@@ -1462,6 +1462,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func setupAudioPipeline() {
         syncAudioSampleRate()
+        // Recycle the audio engine after sleep/wake — a cached engine holding
+        // a stale CoreAudio device crashes when restarted after wake.
+        audioRecorder.installSleepWakeHandlers()
         // Pre-warm CoreAudio/AVAudioEngine — cold creation can take multiple seconds with Discord open.
         audioRecorder.prepareEngine()
 
