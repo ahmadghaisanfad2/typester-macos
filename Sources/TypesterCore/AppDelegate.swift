@@ -96,7 +96,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             updateMonitoringMode()
         }
 
-        updateActivationPolicy()
+        // Do not touch the activation policy at launch unless the Dock
+        // setting requires promoting from the LSUIElement default. Flipping
+        // the policy during applicationDidFinishLaunching (e.g. demoting
+        // after onboarding promoted to .regular while its window is not yet
+        // visible) leaves the status item rendering blank on macOS 27.
+        if SettingsStore.shared.showInDock {
+            updateActivationPolicy()
+        }
 
         // Silent background check for a newer GitHub release (throttled).
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
@@ -726,8 +733,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let image = AssetLoader.loadImage(named: "MenuBarIcon.png") {
             image.isTemplate = true
             image.size = NSSize(width: 18, height: 18)
+            Debug.log("menu bar icon loaded: reps=\(image.representations.count) template=\(image.isTemplate)")
             return image
         }
+        Debug.log("menu bar icon NOT FOUND — using fallback glyph")
         return createFallbackIcon()
     }
 
@@ -768,6 +777,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         if let button = statusItem.button {
             button.image = normalIcon
+            Debug.log("status item configured: icon=\(normalIcon != nil) reps=\(normalIcon?.representations.count ?? 0) size=\(String(describing: normalIcon?.size))")
+        } else {
+            Debug.log("status item has NO button")
         }
 
         rebuildMenu()
