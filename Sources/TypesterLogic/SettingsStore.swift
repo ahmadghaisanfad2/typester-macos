@@ -121,6 +121,16 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// When true, keep Typester in the Dock with a regular activation policy.
+    /// When false (default), it runs from the menu bar and only appears in the
+    /// Dock while one of its windows is open.
+    @Published public var showInDock: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showInDock, forKey: showInDockKey)
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     /// When true, paste each time the STT provider detects a pause (endpoint).
     /// When false (default), keep streaming in the overlay and paste only when you stop.
     @Published public var pasteOnPause: Bool = false {
@@ -146,6 +156,7 @@ public class SettingsStore: ObservableObject {
     private let playDictationSoundsKey = "playDictationSounds"
     private let dictationSoundVolumeKey = "dictationSoundVolume"
     private let pasteOnPauseKey = "pasteOnPause"
+    private let showInDockKey = "showInDock"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
@@ -359,6 +370,9 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: pasteOnPauseKey) != nil {
             pasteOnPause = UserDefaults.standard.bool(forKey: pasteOnPauseKey)
+        }
+        if UserDefaults.standard.object(forKey: showInDockKey) != nil {
+            showInDock = UserDefaults.standard.bool(forKey: showInDockKey)
         }
     }
 

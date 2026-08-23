@@ -96,6 +96,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             updateMonitoringMode()
         }
 
+        updateActivationPolicy()
         applyDebugOverrides()
     }
 
@@ -224,6 +225,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateMonitoringMode()
         updateSTTProvider()
         rebuildMenu()
+        updateActivationPolicy()
+    }
+
+    /// Keep the Dock presence in sync with the "Show in Dock" setting.
+    /// The app launches as a menu-bar-only LSUIElement process; it must be
+    /// .regular while any of its windows are open (text input needs it) or
+    /// when the user opted into a permanent Dock icon.
+    private func updateActivationPolicy() {
+        let hasVisibleWindow = [settingsWindow, onboardingWindow, teachWindow]
+            .contains { $0?.isVisible == true }
+        let desired: NSApplication.ActivationPolicy =
+            (SettingsStore.shared.showInDock || hasVisibleWindow) ? .regular : .accessory
+        guard NSApp.activationPolicy() != desired else { return }
+        if desired == .regular {
+            setupMainMenu()
+        }
+        NSApp.setActivationPolicy(desired)
     }
 
     private func updateSTTProvider() {
@@ -1110,7 +1128,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             lastTranscript = ""
             rebuildMenu()
         }
-        NSApp.setActivationPolicy(.accessory)
+        updateActivationPolicy()
     }
 
     private func startRetranscribe(entryID: UUID) {
@@ -1416,7 +1434,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             openSettings()
         } else {
             // Reset to accessory policy if not opening settings
-            NSApp.setActivationPolicy(.accessory)
+            updateActivationPolicy()
         }
     }
 
@@ -1684,8 +1702,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Reset to accessory policy when settings/onboarding/teach closes (menu bar app behavior)
         let remainingWindows = [settingsWindow, onboardingWindow, teachWindow].compactMap { $0 }
         let stillOpen = remainingWindows.contains { $0.isVisible }
-        if !stillOpen, NSApp.activationPolicy() == .regular {
-            NSApp.setActivationPolicy(.accessory)
+        if !stillOpen {
+            updateActivationPolicy()
         }
     }
 
