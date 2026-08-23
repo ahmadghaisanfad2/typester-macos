@@ -37,19 +37,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var sessionDiscarded = false
     private var accumulatedText = ""
     private var lastInterimText = ""
-    private var sessionAudioPCM = Data()
+    private let transcriptAssembler = TranscriptSessionAssembler()
+    private let sessionAudioPCM = AudioSessionBuffer()
+    /// Audio since the last successful paste-on-pause checkpoint.
+    private let uncommittedAudioPCM = AudioSessionBuffer()
     private var sessionAppName = ""
     private var sessionSampleRate: Double = 16_000
     private var sessionPastedText = ""
     private var isRetranscribing = false
     private var retranscribeEntryID: UUID?
     private var pendingFinalizeWorkItem: DispatchWorkItem?
+    private let recoveryLock = NSLock()
+    private var recoveryPendingChunks: [Data] = []
+    private var recoveryGeneration: UInt = 0
+    private var recoveryAttempt = 0
+    private var isRecoveringConnection = false
+    private var recoveryWorkItem: DispatchWorkItem?
+    private var recoveryTimeoutWorkItem: DispatchWorkItem?
+    private var recoveryReplayWorkItem: DispatchWorkItem?
+    private var stopRequestedDuringRecovery = false
     private var normalIcon: NSImage?
     private var recordingIcon: NSImage?
     private let subtitleOverlay = SubtitleOverlay.shared
 
     public override init() {
         super.init()
+        subtitleOverlay.onCancel = { [weak self] in
+            self?.cancelActiveTranscription()
+        }
     }
 
     // MARK: - App lifecycle
@@ -79,6 +94,106 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showOnboarding()
         } else {
             updateMonitoringMode()
+        }
+
+        applyDebugOverrides()
+    }
+
+    // MARK: - Demo overrides (screenshot/verification aid)
+
+    /// Environment-driven hooks used for automated visual checks:
+    /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
+    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting,
+    /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png.
+    private func applyDebugOverrides() {
+        let env = ProcessInfo.processInfo.environment
+
+        if let appearance = env["TYPESTER_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        }
+        if let fake = env["TYPESTER_FAKE_TRANSCRIPT"], !fake.isEmpty {
+            lastTranscript = fake
+        }
+
+        let snapshotPath = env["TYPESTER_SNAPSHOT"]
+        switch env["TYPESTER_DEMO"] {
+        case "settings":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.openSettings()
+                if let snapshotPath { self.scheduleSnapshot(of: \.settingsWindow, to: snapshotPath) }
+            }
+        case "onboarding":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.showOnboarding()
+                if let snapshotPath { self.scheduleSnapshot(of: \.onboardingWindow, to: snapshotPath) }
+            }
+        case "teach":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.openTeachDictionary()
+                if let snapshotPath { self.scheduleSnapshot(of: \.teachWindow, to: snapshotPath) }
+            }
+        case "pill":
+            let mode = env["TYPESTER_PILL_MODE"] ?? "live"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.demoPill(mode: mode) }
+            if let snapshotPath {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    self.subtitleOverlay.snapshotForDebug(to: snapshotPath)
+                    NSApp.terminate(self)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    /// Renders a demo window's content view to PNG (no screen-recording permission needed).
+    private func scheduleSnapshot(of keyPath: ReferenceWritableKeyPath<AppDelegate, NSWindow?>, to path: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard let window = self[keyPath: keyPath] else { return }
+            Self.snapshot(window: window, to: path)
+            NSApp.terminate(self)
+        }
+    }
+
+    static func snapshot(window: NSWindow, to path: String) {
+        guard let contentView = window.contentView else { return }
+        contentView.layoutSubtreeIfNeeded()
+        let bounds = contentView.bounds
+        guard bounds.width > 1, bounds.height > 1,
+              let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(bounds.width) * 2,
+                pixelsHigh: Int(bounds.height) * 2,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .calibratedRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+              ) else { return }
+        rep.size = bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        contentView.cacheDisplay(in: bounds, to: rep)
+        NSGraphicsContext.restoreGraphicsState()
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+            Debug.log("Snapshot written to \(path)")
+        }
+    }
+
+    private func demoPill(mode: String) {
+        let notesIcon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
+        subtitleOverlay.show(appName: "Notes", appIcon: notesIcon)
+        switch mode {
+        case "processing":
+            subtitleOverlay.showProcessing()
+        case "reconnecting":
+            subtitleOverlay.showReconnecting()
+        default:
+            subtitleOverlay.updateFinal("ship the ")
+            subtitleOverlay.updateInterim("release candidate tomorrow")
         }
     }
 
@@ -147,29 +262,36 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onDisconnected = { [weak self] in
             guard let self = self else { return }
-            self.subtitleOverlay.hide()
-            self.audioRecorder.stopRecording()
             if self.isRetranscribing {
+                self.subtitleOverlay.hide()
+                self.audioRecorder.stopRecording()
                 self.finishRetranscribe(success: false)
                 return
             }
-            guard self.isRecording else { return }
-            self.isRecording = false
-            self.statusItem.button?.image = self.normalIcon
-            self.rebuildMenu()
+            if self.isConnectionRecoveryActive() {
+                self.handleRecoveryDisconnect()
+                return
+            }
+            if self.isRecording {
+                self.beginConnectionRecovery()
+            } else {
+                self.subtitleOverlay.hide()
+                self.audioRecorder.stopRecording()
+            }
         }
 
         sttProvider.onTranscript = { [weak self] text, isFinal in
             guard let self = self else { return }
             Debug.log("onTranscript: \"\(text)\" isFinal=\(isFinal)")
             if isFinal {
-                self.accumulatedText += text
-                self.lastInterimText = ""
+                self.transcriptAssembler.appendFinal(text)
+                self.syncTranscriptState()
                 if !self.isRetranscribing {
                     self.subtitleOverlay.updateFinal(text)
                 }
             } else {
-                self.lastInterimText = text
+                self.transcriptAssembler.replaceInterim(text)
+                self.syncTranscriptState()
                 if !self.isRetranscribing {
                     self.subtitleOverlay.updateInterim(text)
                 }
@@ -188,14 +310,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onFinalized = { [weak self] in
             guard let self = self else { return }
-            if self.isRetranscribing {
-                self.handleRetranscribeFinalized()
-                return
-            }
             if self.sessionDiscarded {
                 self.sessionDiscarded = false
                 self.subtitleOverlay.hide()
                 self.sttProvider.disconnect()
+                return
+            }
+            if self.isRetranscribing {
+                self.handleRetranscribeFinalized()
                 return
             }
             self.pasteAccumulatedTranscript(saveHistory: true)
@@ -205,6 +327,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sttProvider.onError = { [weak self] error in
             guard let self = self else { return }
+            if self.isConnectionRecoveryActive() {
+                self.handleRecoveryError(error)
+                return
+            }
+            if self.sessionDiscarded {
+                self.sessionDiscarded = false
+                self.isRecording = false
+                self.statusItem.button?.image = self.normalIcon
+                self.subtitleOverlay.hide()
+                self.audioRecorder.stopRecording()
+                self.sttProvider.disconnect()
+                return
+            }
             if self.isRetranscribing {
                 self.finishRetranscribe(success: false)
                 self.sttProvider.disconnect()
@@ -228,8 +363,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 historyText = self.sessionPastedText + " " + current
             }
             self.saveSessionToHistory(text: historyText, status: .failed)
-            self.accumulatedText = ""
-            self.lastInterimText = ""
+            self.resetTranscriptSession()
             self.sessionPastedText = ""
             self.rebuildMenu()
             self.showError(error)
@@ -237,6 +371,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func onSTTConnected() {
+        if isConnectionRecoveryActive() {
+            replayRecoveredAudio()
+            return
+        }
+
         guard isRetranscribing, let id = retranscribeEntryID,
               let entry = historyStore.entries.first(where: { $0.id == id }),
               let url = historyStore.audioURL(for: entry),
@@ -244,6 +383,275 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         replayPCM(pcm, sampleRate: entry.sampleRate)
+    }
+
+    private func syncTranscriptState() {
+        accumulatedText = transcriptAssembler.finalText
+        lastInterimText = transcriptAssembler.interimText
+    }
+
+    private func resetTranscriptSession() {
+        transcriptAssembler.reset()
+        accumulatedText = ""
+        lastInterimText = ""
+    }
+
+    // MARK: - Connection recovery
+
+    private func isConnectionRecoveryActive() -> Bool {
+        recoveryLock.withLock { isRecoveringConnection }
+    }
+
+    private func beginConnectionRecovery() {
+        guard isRecording else { return }
+
+        let shouldStart = recoveryLock.withLock { () -> Bool in
+            guard !isRecoveringConnection else { return false }
+            isRecoveringConnection = true
+            recoveryAttempt = 0
+            recoveryPendingChunks.removeAll(keepingCapacity: true)
+            recoveryGeneration &+= 1
+            stopRequestedDuringRecovery = false
+            return true
+        }
+
+        recoveryReplayWorkItem?.cancel()
+        recoveryTimeoutWorkItem?.cancel()
+        if !shouldStart {
+            scheduleRecoveryAttempt(after: 0.2)
+            return
+        }
+
+        Debug.log("STT connection lost while recording; beginning recovery")
+        subtitleOverlay.showReconnecting()
+        // Clear the provider's old FIFO. The app-level PCM buffers are the
+        // source of truth for replay, so the new socket starts at a known point.
+        sttProvider.disconnect()
+        scheduleRecoveryAttempt(after: 0.35)
+    }
+
+    private func scheduleRecoveryAttempt(after delay: TimeInterval) {
+        guard isConnectionRecoveryActive() else { return }
+        recoveryWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.attemptConnectionRecovery()
+        }
+        recoveryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func attemptConnectionRecovery() {
+        guard isConnectionRecoveryActive() else { return }
+        guard isRecording || recoveryStopWasRequested() else {
+            cancelConnectionRecovery()
+            return
+        }
+
+        let attempt = recoveryLock.withLock { () -> Int in
+            recoveryAttempt += 1
+            recoveryWorkItem = nil
+            return recoveryAttempt
+        }
+        guard attempt <= 2 else {
+            failConnectionRecovery("Connection recovery failed after two attempts. The captured audio was saved for re-transcription.")
+            return
+        }
+
+        Debug.log("STT recovery attempt \(attempt)/2")
+        sttProvider.disconnect()
+        sttProvider.connect()
+
+        recoveryTimeoutWorkItem?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.isConnectionRecoveryActive() else { return }
+            self.handleRecoveryError("The speech service did not reconnect in time.")
+        }
+        recoveryTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timeout)
+    }
+
+    private func handleRecoveryDisconnect() {
+        guard isConnectionRecoveryActive() else { return }
+        recoveryReplayWorkItem?.cancel()
+        recoveryReplayWorkItem = nil
+        recoveryTimeoutWorkItem?.cancel()
+        recoveryTimeoutWorkItem = nil
+        recoveryLock.withLock {
+            recoveryGeneration &+= 1
+        }
+        scheduleRecoveryAttempt(after: 0.25)
+    }
+
+    private func handleRecoveryError(_ message: String) {
+        guard isConnectionRecoveryActive() else { return }
+        let lowered = message.lowercased()
+        let isPermanent = lowered.contains("api key")
+            || lowered.contains("unauthorized")
+            || lowered.contains("authentication")
+            || lowered.contains("401")
+            || lowered.contains("403")
+        let attempt = recoveryLock.withLock { recoveryAttempt }
+        if isPermanent || attempt >= 2 {
+            failConnectionRecovery(message)
+        } else {
+            scheduleRecoveryAttempt(after: 0.35)
+        }
+    }
+
+    private func replayRecoveredAudio() {
+        guard isConnectionRecoveryActive() else { return }
+        recoveryTimeoutWorkItem?.cancel()
+        recoveryTimeoutWorkItem = nil
+        recoveryReplayWorkItem?.cancel()
+
+        let generation = recoveryLock.withLock { recoveryGeneration }
+        let pcm = SettingsStore.shared.pasteOnPause
+            ? uncommittedAudioPCM.snapshot()
+            : sessionAudioPCM.snapshot()
+
+        // Replay replaces the provider's old transcript state. This is what
+        // prevents final text from the old socket being appended a second time.
+        resetTranscriptSession()
+        subtitleOverlay.clearText()
+        if !recoveryStopWasRequested() {
+            subtitleOverlay.clearProcessing()
+        }
+
+        guard !pcm.isEmpty else {
+            finishRecoveredReplay(generation: generation)
+            return
+        }
+
+        let bytesPerSecond = Int(sessionSampleRate) * MemoryLayout<Int16>.size
+        let chunkSize = max(bytesPerSecond / 10, MemoryLayout<Int16>.size * 2)
+        var offset = 0
+
+        func sendNextChunk() {
+            guard self.isRecoveryGenerationActive(generation) else { return }
+            if offset >= pcm.count {
+                self.finishRecoveredReplay(generation: generation)
+                return
+            }
+
+            let end = min(offset + chunkSize, pcm.count)
+            self.sttProvider.sendAudio(pcm.subdata(in: offset..<end))
+            offset = end
+
+            let workItem = DispatchWorkItem {
+                sendNextChunk()
+            }
+            self.recoveryReplayWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+        }
+
+        sendNextChunk()
+    }
+
+    private func isRecoveryGenerationActive(_ generation: UInt) -> Bool {
+        recoveryLock.withLock {
+            isRecoveringConnection && recoveryGeneration == generation
+        }
+    }
+
+    private func recoveryStopWasRequested() -> Bool {
+        recoveryLock.withLock { stopRequestedDuringRecovery }
+    }
+
+    private func finishRecoveredReplay(generation: UInt) {
+        guard isRecoveryGenerationActive(generation) else { return }
+        recoveryReplayWorkItem = nil
+
+        let shouldFinalize = recoveryLock.withLock { () -> Bool in
+            let chunks = recoveryPendingChunks
+            recoveryPendingChunks.removeAll(keepingCapacity: true)
+            // Keep the recovery flag set while these chunks enter the
+            // provider's admission FIFO. The audio callback blocks on the
+            // same lock, so live audio cannot overtake the replay tail.
+            for chunk in chunks {
+                sttProvider.sendAudio(chunk)
+            }
+            let shouldFinalize = stopRequestedDuringRecovery
+            isRecoveringConnection = false
+            stopRequestedDuringRecovery = false
+            return shouldFinalize
+        }
+        if shouldFinalize {
+            subtitleOverlay.showProcessing()
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.sttProvider.sendFinalize()
+            }
+            pendingFinalizeWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+        } else {
+            subtitleOverlay.clearProcessing()
+        }
+    }
+
+    private func failConnectionRecovery(_ message: String) {
+        guard isConnectionRecoveryActive() else { return }
+        recoveryLock.withLock {
+            isRecoveringConnection = false
+            recoveryGeneration &+= 1
+            recoveryPendingChunks.removeAll(keepingCapacity: true)
+            stopRequestedDuringRecovery = false
+        }
+        recoveryWorkItem?.cancel()
+        recoveryTimeoutWorkItem?.cancel()
+        recoveryReplayWorkItem?.cancel()
+        recoveryWorkItem = nil
+        recoveryTimeoutWorkItem = nil
+        recoveryReplayWorkItem = nil
+
+        audioRecorder.stopRecording()
+        isRecording = false
+        statusItem.button?.image = normalIcon
+        subtitleOverlay.hide()
+
+        let current = currentSessionText()
+        let historyText: String
+        if sessionPastedText.isEmpty {
+            historyText = current
+        } else if current.isEmpty {
+            historyText = sessionPastedText
+        } else {
+            historyText = sessionPastedText + " " + current
+        }
+        saveSessionToHistory(text: historyText, status: .failed)
+        resetTranscriptSession()
+        sessionPastedText = ""
+        rebuildMenu()
+        sttProvider.disconnect()
+        showError(message)
+    }
+
+    private func cancelConnectionRecovery() {
+        recoveryLock.withLock {
+            isRecoveringConnection = false
+            recoveryGeneration &+= 1
+            recoveryPendingChunks.removeAll(keepingCapacity: true)
+            stopRequestedDuringRecovery = false
+        }
+        recoveryWorkItem?.cancel()
+        recoveryTimeoutWorkItem?.cancel()
+        recoveryReplayWorkItem?.cancel()
+        recoveryWorkItem = nil
+        recoveryTimeoutWorkItem = nil
+        recoveryReplayWorkItem = nil
+    }
+
+    private func appendRecoveryAudio(_ data: Data) -> Bool {
+        recoveryLock.withLock {
+            guard isRecoveringConnection else { return false }
+            recoveryPendingChunks.append(data)
+            return true
+        }
+    }
+
+    private func currentSessionText() -> String {
+        TranscriptPastePayload.resolve(
+            accumulatedText: accumulatedText,
+            lastInterimText: lastInterimText
+        ) ?? ""
     }
 
     // MARK: - Icons
@@ -409,11 +817,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(teachItem)
 
         let settingsItem = NSMenuItem(
-            title: "Settings...",
+            title: "Settings…",
             action: #selector(openSettings),
-            keyEquivalent: ""
+            keyEquivalent: ","
         )
         settingsItem.target = self
+        settingsItem.keyEquivalentModifierMask = .command
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
@@ -594,8 +1003,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
 
         defer {
-            accumulatedText = ""
-            lastInterimText = ""
+            resetTranscriptSession()
         }
 
         if let text = raw {
@@ -610,6 +1018,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } else {
                 sessionPastedText += " " + stored
             }
+            // Only audio after this checkpoint needs replaying on a reconnect
+            // when paste-on-pause is enabled.
+            uncommittedAudioPCM.clear()
         }
 
         if saveHistory {
@@ -626,10 +1037,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func saveSessionToHistory(text: String, status: TranscriptEntryStatus) {
         guard !sessionAudioPCM.isEmpty else { return }
-        let pcm = sessionAudioPCM
+        let pcm = sessionAudioPCM.take()
         let appName = sessionAppName
         let sampleRate = sessionSampleRate
-        sessionAudioPCM = Data()
+        uncommittedAudioPCM.clear()
 
         do {
             _ = try historyStore.add(
@@ -720,8 +1131,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         isRetranscribing = true
         retranscribeEntryID = entryID
-        accumulatedText = ""
-        lastInterimText = ""
+        resetTranscriptSession()
         rebuildMenu()
 
         let frontApp = NSWorkspace.shared.frontmostApplication
@@ -774,8 +1184,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             accumulatedText: accumulatedText,
             lastInterimText: lastInterimText
         )
-        accumulatedText = ""
-        lastInterimText = ""
+        resetTranscriptSession()
 
         guard let text = raw else {
             finishRetranscribe(success: false)
@@ -807,6 +1216,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         retranscribeEntryID = nil
         pendingFinalizeWorkItem?.cancel()
         pendingFinalizeWorkItem = nil
+        // Do not rely on the provider's disconnect callback to clean up the
+        // processing pill. Some providers finalize before their socket emits
+        // a disconnect event, which otherwise leaves the spinner on screen.
+        subtitleOverlay.hide()
         Debug.log("Re-transcribe finished success=\(success)")
         rebuildMenu()
     }
@@ -966,12 +1379,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             if !self.isRetranscribing {
                 self.sessionAudioPCM.append(data)
+                self.uncommittedAudioPCM.append(data)
+                if self.appendRecoveryAudio(data) {
+                    return
+                }
             }
             self.sttProvider.sendAudio(data)
         }
 
-        audioRecorder.onAudioLevel = { [weak self] level in
-            self?.subtitleOverlay.updateAudioLevel(level)
+        audioRecorder.onSpectrum = { [weak self] bands in
+            self?.subtitleOverlay.updateSpectrum(bands)
         }
 
         audioRecorder.onError = { [weak self] _ in
@@ -1038,10 +1455,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         isRecording = true
         sessionDiscarded = false
+        cancelConnectionRecovery()
         statusItem.button?.image = recordingIcon
-        accumulatedText = ""
-        lastInterimText = ""
-        sessionAudioPCM = Data()
+        resetTranscriptSession()
+        sessionAudioPCM.clear()
+        uncommittedAudioPCM.clear()
         sessionPastedText = ""
         sessionSampleRate = SettingsStore.shared.sttProvider.audioSampleRate
         rebuildMenu()
@@ -1068,6 +1486,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         Debug.log("Stopping recording...")
+        let isRecovering = isConnectionRecoveryActive()
         isRecording = false
         sessionDiscarded = false
         statusItem.button?.image = normalIcon
@@ -1079,6 +1498,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Compact spinner while any provider finishes (async upload, OpenAI commit, etc.).
         subtitleOverlay.showProcessing()
+
+        if isRecovering {
+            recoveryLock.withLock {
+                stopRequestedDuringRecovery = true
+            }
+            // The reconnect path will replay the complete unpasted PCM and
+            // issue finalize only after the replay and live tail are ordered.
+            return
+        }
 
         // Small delay to let provider process last audio chunks before finalizing
         let workItem = DispatchWorkItem { [weak self] in
@@ -1094,23 +1522,44 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Debug.log("cancelRecording() called, isRecording=\(isRecording)")
         guard isRecording else { return }
 
+        cancelActiveTranscription()
+    }
+
+    private func cancelActiveTranscription() {
+        Debug.log("cancelActiveTranscription() called, isRecording=\(isRecording), isRetranscribing=\(isRetranscribing)")
+
+        if isRetranscribing {
+            // Re-use the discard guard so a late provider callback cannot paste
+            // or save a result after the user has cancelled the retry.
+            sessionDiscarded = true
+            resetTranscriptSession()
+            finishRetranscribe(success: false)
+            sttProvider.disconnect()
+            return
+        }
+
+        guard isRecording || subtitleOverlay.viewModel.isActive else { return }
+
+        let wasRecording = isRecording
         pendingFinalizeWorkItem?.cancel()
         pendingFinalizeWorkItem = nil
 
         sessionDiscarded = true
         isRecording = false
-        accumulatedText = ""
-        lastInterimText = ""
-        sessionAudioPCM = Data()
+        cancelConnectionRecovery()
+        resetTranscriptSession()
+        sessionAudioPCM.clear()
+        uncommittedAudioPCM.clear()
         sessionPastedText = ""
         statusItem.button?.image = normalIcon
         rebuildMenu()
 
-        FeedbackSoundPlayer.playStop()
+        if wasRecording {
+            FeedbackSoundPlayer.playStop()
+        }
         audioRecorder.stopRecording()
         subtitleOverlay.hide()
         sttProvider.disconnect()
-        sessionDiscarded = false
     }
 
     // MARK: - Shortcut display
@@ -1138,9 +1587,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             let hostingController = NSHostingController(rootView: SettingsView())
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .resizable]
-            window.minSize = NSSize(width: 580, height: 500)
+            window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.minSize = NSSize(width: 700, height: 520)
+            window.setContentSize(NSSize(width: 740, height: 600))
             window.center()
             window.setFrameAutosaveName("SettingsWindow")
             window.delegate = self
@@ -1201,6 +1652,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // App menu
         let appMenu = NSMenu()
+        let settingsMenuItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsMenuItem.target = self
+        appMenu.addItem(settingsMenuItem)
         appMenu.addItem(NSMenuItem(title: "Quit Typester", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         let appMenuItem = NSMenuItem()
         appMenuItem.submenu = appMenu
@@ -1246,8 +1700,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let hostingController = NSHostingController(rootView: onboardingView)
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Welcome to Typester"
-            window.styleMask = [.titled, .closable]
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.center()
             window.delegate = self
             onboardingWindow = window
@@ -1264,5 +1719,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         onboardingWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ body: () -> T) -> T {
+        lock()
+        defer { unlock() }
+        return body()
     }
 }

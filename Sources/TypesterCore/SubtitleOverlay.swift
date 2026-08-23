@@ -2,6 +2,13 @@ import Cocoa
 import SwiftUI
 import TypesterCore
 
+enum SubtitlePresentationPhase: Equatable {
+    case hidden
+    case presenting
+    case visible
+    case dismissing
+}
+
 class SubtitleViewModel: ObservableObject {
     @Published var finalText: String = ""
     @Published var interimText: String = ""
@@ -9,43 +16,73 @@ class SubtitleViewModel: ObservableObject {
     @Published var targetAppName: String = ""
     @Published var targetAppIcon: NSImage?
     @Published var maxCapsuleWidth: CGFloat = 600
-    /// Latest mic envelope target (0...1). WaveformIcon interpolates toward this at display refresh.
-    @Published var targetAudioLevel: CGFloat = 0.08
-    fileprivate static let barCount = 7
-    fileprivate static let levelFloor: CGFloat = 0.08
+    /// Latest per-bar spectral targets (0...1). WaveformIcon springs toward
+    /// these at display refresh, so the box is not @Published (no 60 Hz storm).
+    fileprivate let spectrumTargets = SpectrumTargetBox(count: SubtitleViewModel.barCount)
+    fileprivate static let barCount = 9
     /// When false, hide live transcript text; app name and waveform still show.
     @Published var showStreamPreview: Bool = true
     /// True while waiting for the provider to finalize / return the transcript.
     @Published var isProcessing: Bool = false
+    @Published var processingLabel: String = "Transcribing"
+    /// True while the pointer is over the pill's interactive area.
+    @Published var isHovering: Bool = false
+    /// Window/content lifecycle. Kept separate from recording state so dismissal
+    /// can finish visually before the borderless window is ordered out.
+    @Published var presentationPhase: SubtitlePresentationPhase = .hidden
 
-    var displayText: String {
-        guard showStreamPreview, !isProcessing else { return "" }
-        if !finalText.isEmpty && !interimText.isEmpty
-            && !finalText.hasSuffix(" ") && !interimText.hasPrefix(" ") {
-            return finalText + " " + interimText
-        }
-        return finalText + interimText
+    var hasText: Bool {
+        !finalText.isEmpty || !interimText.isEmpty
+    }
+
+    /// Space between finalized and interim text so words never glue together.
+    var interimJoiner: String? {
+        guard !finalText.isEmpty, !interimText.isEmpty,
+              !finalText.hasSuffix(" "), !interimText.hasPrefix(" ") else { return nil }
+        return " "
+    }
+
+    /// Combined transcript; changes whenever either half changes (scroll key).
+    var textRevision: String {
+        finalText + "\u{2028}" + interimText
     }
 
     func show(appName: String, appIcon: NSImage?) {
         finalText = ""
         interimText = ""
         isProcessing = false
+        processingLabel = "Transcribing"
+        isHovering = false
         targetAppName = appName
         targetAppIcon = appIcon
-        targetAudioLevel = Self.levelFloor
+        spectrumTargets.reset()
         showStreamPreview = SettingsStore.shared.showStreamPreview
         isActive = true
+        presentationPhase = .presenting
     }
 
-    func hide() {
+    func present() {
+        presentationPhase = .visible
+    }
+
+    func beginDismissal() {
+        guard presentationPhase != .hidden else { return }
+        isActive = false
+        isHovering = false
+        presentationPhase = .dismissing
+    }
+
+    func finishHide() {
+        presentationPhase = .hidden
         isActive = false
         finalText = ""
         interimText = ""
         isProcessing = false
+        processingLabel = "Transcribing"
+        isHovering = false
         targetAppName = ""
         targetAppIcon = nil
-        targetAudioLevel = Self.levelFloor
+        spectrumTargets.reset()
     }
 
     func updateFinal(_ text: String) {
@@ -59,9 +96,10 @@ class SubtitleViewModel: ObservableObject {
         interimText = text
     }
 
-    /// Compact post-stop waiting state (spinner + small label).
-    func showProcessing() {
+    /// Compact post-stop waiting state (breathing waveform + small label).
+    func showProcessing(label: String = "Transcribing") {
         isProcessing = true
+        processingLabel = label
         interimText = ""
     }
 
@@ -74,61 +112,176 @@ class SubtitleViewModel: ObservableObject {
         interimText = ""
     }
 
-    func updateAudioLevel(_ level: Float) {
-        let sample = CGFloat(min(1, max(0, level)))
-        // Fast attack, soft release — display layer interpolates at 60 FPS.
-        if sample >= targetAudioLevel {
-            targetAudioLevel = sample
-        } else {
-            targetAudioLevel = targetAudioLevel + (sample - targetAudioLevel) * 0.35
+    /// Per-band mic levels from the recorder's FFT; main thread, ~60 Hz.
+    func updateSpectrum(_ bands: [Float]) {
+        spectrumTargets.update(bands)
+    }
+}
+
+/// Main-thread holder for the newest per-bar spectrum targets.
+final class SpectrumTargetBox {
+    private(set) var values: [CGFloat]
+
+    init(count: Int) {
+        values = Array(repeating: 0, count: count)
+    }
+
+    func update(_ bands: [Float]) {
+        for index in values.indices {
+            let band = index < bands.count ? bands[index] : 0
+            values[index] = CGFloat(min(1, max(0, band)))
+        }
+    }
+
+    func reset() {
+        for index in values.indices { values[index] = 0 }
+    }
+}
+
+/// Per-bar spring state advanced once per display frame (semi-implicit Euler).
+final class BarSimulation {
+    private(set) var positions: [CGFloat]
+    private var velocities: [CGFloat]
+    private var lastTime: TimeInterval?
+
+    /// ωn ≈ 33 rad/s (~0.19 s settle), ζ = 0.85 — quick with a whisper of overshoot.
+    private static let stiffness: CGFloat = 1100
+    private static let damping: CGFloat = 2 * 0.85 * 1100.squareRoot()
+
+    init(count: Int) {
+        positions = Array(repeating: 0, count: count)
+        velocities = Array(repeating: 0, count: count)
+    }
+
+    func reset() {
+        for index in positions.indices {
+            positions[index] = 0
+            velocities[index] = 0
+        }
+        lastTime = nil
+    }
+
+    func advance(now: TimeInterval, targets: [CGFloat]) {
+        let dt = min(max(now - (lastTime ?? now), 0), 1.0 / 30.0)
+        lastTime = now
+        guard dt > 0 else { return }
+
+        for index in positions.indices {
+            let target = index < targets.count ? targets[index] : 0
+            let acceleration = Self.stiffness * (target - positions[index]) - Self.damping * velocities[index]
+            velocities[index] += acceleration * dt
+            positions[index] += velocities[index] * dt
+            // A shout must not fling a bar past the frame even for a frame.
+            positions[index] = min(1.15, max(0, positions[index]))
         }
     }
 }
 
 struct WaveformIcon: View {
     @ObservedObject var viewModel: SubtitleViewModel
-    /// Mutable display envelope without publishing every frame (TimelineView already redraws).
-    @State private var displayBox = WaveformDisplayBox()
+    @State private var simulation = BarSimulation(count: SubtitleViewModel.barCount)
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
-    /// Compact symmetric weights (keeps the pill short).
-    private static let weights: [CGFloat] = [0.45, 0.7, 0.9, 1.0, 0.9, 0.7, 0.45]
+    private static let barWidth: CGFloat = 2.5
+    private static let barSpacing: CGFloat = 2
+    private static let frameWidth = CGFloat(SubtitleViewModel.barCount) * barWidth
+        + CGFloat(SubtitleViewModel.barCount - 1) * barSpacing
+    private static let frameHeight: CGFloat = 18
+    private static let minBarHeight: CGFloat = 3.5
+    private static let levelSpan: CGFloat = 12.5
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !viewModel.isActive)) { context in
-            let displayLevel = advanceDisplay()
-            HStack(spacing: 1.5) {
-                ForEach(0..<SubtitleViewModel.barCount, id: \.self) { index in
-                    let weight = index < Self.weights.count ? Self.weights[index] : 0.5
-                    // Light phase motion so bars feel alive without looking random.
-                    let phase = sin(context.date.timeIntervalSinceReferenceDate * 10.5 + Double(index) * 0.7)
-                    let shimmer = 0.88 + 0.12 * CGFloat(phase)
-                    let level = max(SubtitleViewModel.levelFloor, displayLevel * weight * shimmer)
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.white.opacity(0.92))
-                        .frame(width: 2, height: 3.5 + level * 12)
+        Group {
+            if accessibilityReduceMotion {
+                bars(levels: Array(repeating: 0.08, count: SubtitleViewModel.barCount))
+            } else {
+                TimelineView(.animation(paused: !viewModel.isActive)) { context in
+                    let now = context.date.timeIntervalSinceReferenceDate
+                    bars(levels: advanceSimulation(now: now))
                 }
             }
-            .frame(width: 26, height: 16)
+        }
+        .frame(width: Self.frameWidth, height: Self.frameHeight)
+        .accessibilityLabel("Microphone level")
+        .onChange(of: viewModel.isActive) { active in
+            if active { simulation.reset() }
         }
     }
 
-    private func advanceDisplay() -> CGFloat {
-        let target = max(SubtitleViewModel.levelFloor, viewModel.targetAudioLevel)
-        if target >= displayBox.level {
-            displayBox.level = target
-        } else {
-            displayBox.level += (target - displayBox.level) * 0.28
-        }
-        return displayBox.level
+    /// Steps the springs toward this frame's targets and returns bar positions.
+    private func advanceSimulation(now: TimeInterval) -> [CGFloat] {
+        simulation.advance(now: now, targets: targets(now: now))
+        return simulation.positions
     }
-}
 
-private final class WaveformDisplayBox {
-    var level: CGFloat = SubtitleViewModel.levelFloor
+    private func bars(levels: [CGFloat]) -> some View {
+        Canvas { context, size in
+            var bars = Path()
+            for (index, level) in levels.enumerated() {
+                let height = Self.minBarHeight + level * Self.levelSpan
+                let x = CGFloat(index) * (Self.barWidth + Self.barSpacing)
+                bars.addRoundedRect(
+                    in: CGRect(
+                        x: x,
+                        y: (size.height - height) / 2,
+                        width: Self.barWidth,
+                        height: height
+                    ),
+                    cornerSize: CGSize(width: Self.barWidth / 2, height: Self.barWidth / 2),
+                    style: .continuous
+                )
+            }
+
+            // Bloom pass: one shared blur whose opacity tracks overall energy.
+            var glow = context
+            glow.addFilter(.blur(radius: 3.5))
+            glow.opacity = 0.10 + 0.34 * min(1, levels.reduce(0, +) / CGFloat(levels.count))
+            glow.fill(bars, with: .color(.white))
+
+            // Crisp bars with a soft top-biased gradient.
+            context.fill(
+                bars,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color.white.opacity(0.98),
+                        Color.white.opacity(0.70)
+                    ]),
+                    startPoint: CGPoint(x: 0, y: 0),
+                    endPoint: CGPoint(x: 0, y: size.height)
+                )
+            )
+        }
+    }
+
+    /// Display targets for this frame: live spectrum, processing breath, or idle.
+    private func targets(now: TimeInterval) -> [CGFloat] {
+        let count = SubtitleViewModel.barCount
+        var result = [CGFloat](repeating: 0, count: count)
+
+        if viewModel.isProcessing {
+            // Slow traveling wave — "still working" in the waveform's own language.
+            for index in 0..<count {
+                let phase = sin(now * 2 * .pi / 1.7 - Double(index) * 0.55)
+                result[index] = 0.10 + 0.20 * (0.5 + 0.5 * phase)
+            }
+            return result
+        }
+
+        let bands = viewModel.spectrumTargets.values
+        for index in 0..<count {
+            let band = index < bands.count ? bands[index] : 0
+            // Micro idle drift so silence still breathes a little.
+            let idle = 0.02 + 0.02 * sin(now * 1.9 + Double(index) * 0.9)
+            result[index] = max(band, idle)
+        }
+        return result
+    }
 }
 
 struct SubtitleView: View {
     @ObservedObject var viewModel: SubtitleViewModel
+    var onCancel: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
@@ -144,9 +297,86 @@ struct SubtitleView: View {
                 )
             )
             .fixedSize()
+            .opacity(presentationOpacity)
+            .scaleEffect(presentationScale, anchor: .bottom)
+            .offset(y: presentationOffset)
+            .animation(presentationAnimation, value: viewModel.presentationPhase)
+    }
+
+    private var presentationScale: CGFloat {
+        switch viewModel.presentationPhase {
+        case .hidden: return 0.94
+        case .presenting: return 0.88
+        case .visible: return 1
+        case .dismissing: return 0.94
+        }
+    }
+
+    private var presentationOpacity: Double {
+        viewModel.presentationPhase == .visible ? 1 : 0
+    }
+
+    private var presentationOffset: CGFloat {
+        switch viewModel.presentationPhase {
+        case .hidden: return 8
+        case .presenting: return 10
+        case .visible: return 0
+        case .dismissing: return 9
+        }
+    }
+
+    private var presentationAnimation: Animation {
+        if accessibilityReduceMotion {
+            return .easeInOut(duration: 0.16)
+        }
+        return .spring(response: 0.34, dampingFraction: 0.8, blendDuration: 0.08)
     }
 
     private var pillContent: some View {
+        // Keep the normal content as the sole layout anchor. The cancel action
+        // is an overlay so its label can never change the pill's measured size.
+        regularContent
+            .frame(minHeight: 20)
+            .opacity(viewModel.isHovering ? 0 : 1)
+            .scaleEffect(viewModel.isHovering ? 0.985 : 1)
+            .allowsHitTesting(!viewModel.isHovering)
+            .overlay(cancelButton)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    viewModel.isHovering = isHovering
+                }
+            }
+    }
+
+    private var cancelButton: some View {
+        Button {
+            onCancel?()
+        } label: {
+            Label("Cancel", systemImage: "xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.92))
+                .tracking(0.2)
+                // Horizontal padding keeps the label comfortable without
+                // adding any height to the existing pill content area.
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.white.opacity(0.10), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .opacity(viewModel.isHovering ? 1 : 0)
+        .scaleEffect(viewModel.isHovering ? 1 : 0.985)
+        .allowsHitTesting(viewModel.isHovering)
+        .accessibilityHidden(!viewModel.isHovering)
+        .accessibilityLabel("Cancel transcription")
+        .help("Cancel transcription")
+    }
+
+    private var regularContent: some View {
         HStack(spacing: 8) {
             if let icon = viewModel.targetAppIcon {
                 Image(nsImage: icon)
@@ -155,46 +385,61 @@ struct SubtitleView: View {
             }
 
             if viewModel.isProcessing {
-                ProgressView()
-                    .controlSize(.small)
-                    .colorScheme(.dark)
-                    .frame(width: 14, height: 14)
+                WaveformIcon(viewModel: viewModel)
 
-                Text("Transcribing")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.75))
-                    .tracking(0.2)
+                Text(viewModel.processingLabel)
+                    .font(.mono(10.5, .semibold))
+                    .foregroundColor(.white.opacity(0.78))
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+                    .lineLimit(1)
             } else {
                 WaveformIcon(viewModel: viewModel)
 
-                if viewModel.showStreamPreview, !viewModel.displayText.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(viewModel.displayText)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white)
-                                .fixedSize()
-                                .id("text")
-                        }
-                        .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
-                        .onChange(of: viewModel.displayText) { _ in
-                            proxy.scrollTo("text", anchor: .trailing)
-                        }
-                        .onAppear {
-                            proxy.scrollTo("text", anchor: .trailing)
-                        }
-                    }
+                if viewModel.showStreamPreview, viewModel.hasText {
+                    transcript
                 } else if !viewModel.targetAppName.isEmpty {
                     // Always show the active app name when preview is off or text has not arrived yet.
                     Text(viewModel.targetAppName)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white.opacity(0.62))
+                        .tracking(0.1)
+                        .lineLimit(1)
                 }
             }
         }
-        .frame(minHeight: 20)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    }
+
+    /// Finalized words at full brightness, interim words dimmed — certainty is legible.
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    if !viewModel.finalText.isEmpty {
+                        Text(viewModel.finalText)
+                            .foregroundColor(.white.opacity(0.95))
+                    }
+                    if let joiner = viewModel.interimJoiner {
+                        Text(joiner)
+                            .foregroundColor(.white.opacity(0.48))
+                    }
+                    if !viewModel.interimText.isEmpty {
+                        Text(viewModel.interimText)
+                            .foregroundColor(.white.opacity(0.48))
+                    }
+                }
+                .font(.system(size: 15))
+                .fixedSize()
+                .id("text")
+            }
+            .frame(maxWidth: viewModel.maxCapsuleWidth - 80)
+            .onChange(of: viewModel.textRevision) { _ in
+                proxy.scrollTo("text", anchor: .trailing)
+            }
+            .onAppear {
+                proxy.scrollTo("text", anchor: .trailing)
+            }
+        }
     }
 }
 
@@ -203,24 +448,55 @@ class SubtitleOverlay {
 
     let viewModel = SubtitleViewModel()
     private var window: NSWindow?
+    private var pendingHide: DispatchWorkItem?
+    private let dismissalDuration: TimeInterval = 0.36
+    var onCancel: (() -> Void)?
 
     private init() {}
 
     func show(appName: String, appIcon: NSImage?) {
         DispatchQueue.main.async {
+            self.pendingHide?.cancel()
+            self.pendingHide = nil
             self.viewModel.maxCapsuleWidth = self.maxCapsuleWidth()
             self.viewModel.show(appName: appName, appIcon: appIcon)
             self.ensureWindow()
             self.window?.orderFront(nil)
-            // Next runloop: SwiftUI has applied @Published changes before we measure.
-            DispatchQueue.main.async { self.repositionWindow() }
+            // First lay out the compact starting state, then animate to the
+            // resting state on the next runloop. This keeps the shadow and
+            // window frame stable while the pill does its small spring pop.
+            self.repositionWindow()
+            DispatchQueue.main.async {
+                guard self.viewModel.presentationPhase == .presenting else { return }
+                self.viewModel.present()
+                self.repositionWindow()
+            }
         }
     }
 
     func hide() {
-        DispatchQueue.main.async {
-            self.viewModel.hide()
-            self.window?.orderOut(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.window != nil else {
+                self.viewModel.finishHide()
+                return
+            }
+
+            self.pendingHide?.cancel()
+            self.viewModel.beginDismissal()
+            self.repositionWindow()
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.viewModel.finishHide()
+                self.window?.orderOut(nil)
+                self.pendingHide = nil
+            }
+            self.pendingHide = workItem
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + self.dismissalDuration,
+                execute: workItem
+            )
         }
     }
 
@@ -240,11 +516,15 @@ class SubtitleOverlay {
         }
     }
 
-    func showProcessing() {
+    func showProcessing(label: String = "Transcribing") {
         DispatchQueue.main.async {
-            self.viewModel.showProcessing()
+            self.viewModel.showProcessing(label: label)
             DispatchQueue.main.async { self.repositionWindow() }
         }
+    }
+
+    func showReconnecting() {
+        showProcessing(label: "Reconnecting…")
     }
 
     func clearProcessing() {
@@ -261,15 +541,21 @@ class SubtitleOverlay {
         }
     }
 
-    func updateAudioLevel(_ level: Float) {
-        // Already expected on main from AudioRecorder; keep hop cheap.
+    /// Per-band mic levels from the recorder's FFT; any thread, coalesced to main.
+    func updateSpectrum(_ bands: [Float]) {
         if Thread.isMainThread {
-            viewModel.updateAudioLevel(level)
+            viewModel.updateSpectrum(bands)
         } else {
             DispatchQueue.main.async {
-                self.viewModel.updateAudioLevel(level)
+                self.viewModel.updateSpectrum(bands)
             }
         }
+    }
+
+    /// Debug aid: renders the overlay's content to PNG for visual checks.
+    func snapshotForDebug(to path: String) {
+        guard let window = window else { return }
+        AppDelegate.snapshot(window: window, to: path)
     }
 
     private func ensureWindow() {
@@ -277,7 +563,10 @@ class SubtitleOverlay {
 
         viewModel.maxCapsuleWidth = maxCapsuleWidth()
         let hosting = NSHostingView(
-            rootView: SubtitleView(viewModel: viewModel)
+            rootView: SubtitleView(
+                viewModel: viewModel,
+                onCancel: { [weak self] in self?.onCancel?() }
+            )
         )
 
         let window = NSWindow(
@@ -291,7 +580,8 @@ class SubtitleOverlay {
         window.hasShadow = false
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.ignoresMouseEvents = true
+        window.acceptsMouseMovedEvents = true
+        window.ignoresMouseEvents = false
         hosting.wantsLayer = true
         hosting.layer?.masksToBounds = false
         hosting.clipsToBounds = false

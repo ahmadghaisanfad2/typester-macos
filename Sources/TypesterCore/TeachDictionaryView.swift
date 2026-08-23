@@ -10,49 +10,69 @@ struct TeachDictionaryView: View {
     @State private var wrong: String = ""
     @State private var right: String = ""
     @State private var errorMessage: String?
+    @FocusState private var wrongFocused: Bool
+    @FocusState private var rightFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Teach dictionary")
-                .font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Teach dictionary")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Codex.text)
 
-            Text("Select the wrong word in the transcript (or type it), then enter the correct spelling. Typester replaces it before pasting and sends the correct term to Soniox.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Select the wrong word in the transcript (or type it), then enter the correct spelling. Typester replaces it before pasting and sends the correct term to Soniox.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Codex.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Last transcript")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Codex.textSecondary)
 
                 SelectableTranscriptView(text: transcript) { selection in
                     if !selection.isEmpty {
                         wrong = selection
                     }
                 }
-                .frame(minHeight: 80, maxHeight: 120)
+                .frame(minHeight: 78, maxHeight: 110)
                 .padding(8)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                )
+                .background(RoundedRectangle(cornerRadius: 8).fill(Codex.surfaceInset))
+                .overlay(HairlineBorder(cornerRadius: 8))
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
 
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Heard (wrong)", text: $wrong)
-                    .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    correctionField(label: "Heard", placeholder: "wrong word", text: $wrong, focused: $wrongFocused) {
+                        rightFocused = true
+                    }
 
-                TextField("Correct (right)", text: $right)
-                    .textFieldStyle(.roundedBorder)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Codex.textTertiary)
+                        .padding(.top, 20)
+
+                    correctionField(label: "Correct", placeholder: "right word", text: $right, focused: $rightFocused, submit: save)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.red)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
 
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            Rectangle()
+                .fill(Codex.hairline)
+                .frame(height: 1)
 
             HStack {
                 Spacer()
@@ -68,9 +88,37 @@ struct TeachDictionaryView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSave)
             }
+            .padding(14)
         }
-        .padding(20)
-        .frame(width: 420)
+        .frame(width: 460)
+        .background(Codex.background)
+        .tint(Codex.green)
+        .onAppear {
+            wrongFocused = true
+        }
+    }
+
+    private func correctionField(
+        label: String,
+        placeholder: String,
+        text: Binding<String>,
+        focused: FocusState<Bool>.Binding,
+        submit: (() -> Void)? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Codex.textSecondary)
+
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.mono(12.5))
+                .fieldCard(focused: focused.wrappedValue)
+                .focused(focused)
+                .onSubmit {
+                    submit?()
+                }
+        }
     }
 
     private var canSave: Bool {
@@ -107,7 +155,8 @@ private struct SelectableTranscriptView: NSViewRepresentable {
         textView.string = text
         textView.isEditable = false
         textView.isSelectable = true
-        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.font = .systemFont(ofSize: 12.5)
+        textView.textColor = .labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.delegate = context.coordinator

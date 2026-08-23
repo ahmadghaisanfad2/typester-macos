@@ -146,7 +146,8 @@ Sources/
 │   └── Debug.swift                 # Debug logging utility
 └── TypesterCore/                   # SwiftUI UI (needs Xcode / CI macOS image)
     ├── AppDelegate.swift           # Status bar, menu, recording control
-    ├── SettingsView.swift          # SwiftUI settings interface
+    ├── TypesterTheme.swift         # Design tokens + shared components (Codex-style)
+    ├── SettingsView.swift          # Sidebar-based settings interface
     ├── OnboardingView.swift        # First-run setup wizard
     ├── TeachDictionaryView.swift   # Teach wrong→right correction UI
     ├── SubtitleOverlay.swift       # Live subtitle overlay

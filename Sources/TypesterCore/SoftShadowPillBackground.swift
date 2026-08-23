@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// AppKit-drawn capsule with a single Core Graphics soft shadow.
-/// Bakes a real Gaussian fade into the layer so borderless windows cannot clip it.
+/// AppKit-drawn capsule with Core Graphics depth and a hairline top highlight.
+/// Bakes real Gaussian fades into the layer so borderless windows cannot clip them.
 final class SoftShadowPillNSView: NSView {
     var cornerRadius: CGFloat = 20
     /// Clear margin around the capsule where the shadow may fade.
@@ -43,31 +43,65 @@ final class SoftShadowPillNSView: NSView {
             transform: nil
         )
 
-        // Single soft shadow pass (one Gaussian — denser near the pill, fades out).
+        // Two shadow passes: a wide ambient occlusion plus a tighter key shadow.
         context.saveGState()
         context.setShadow(
-            offset: CGSize(width: 0, height: -3),
-            blur: 20,
-            color: NSColor.black.withAlphaComponent(0.24).cgColor
+            offset: CGSize(width: 0, height: -7),
+            blur: 24,
+            color: NSColor.black.withAlphaComponent(0.28).cgColor
         )
         context.addPath(path)
         context.setFillColor(NSColor.black.cgColor)
         context.fillPath()
         context.restoreGState()
 
-        // Gradient fill (no shadow).
+        context.saveGState()
+        context.setShadow(
+            offset: CGSize(width: 0, height: -2),
+            blur: 9,
+            color: NSColor.black.withAlphaComponent(0.20).cgColor
+        )
+        context.addPath(path)
+        context.setFillColor(NSColor.black.cgColor)
+        context.fillPath()
+        context.restoreGState()
+
+        // Cool graphite glass fill — a touch of blue so it reads as hardware,
+        // not flat black, and still sits quietly over any app.
         context.saveGState()
         context.addPath(path)
         context.clip()
-        let colors = [
-            NSColor(white: 0.22, alpha: 1).cgColor,
-            NSColor(white: 0.08, alpha: 1).cgColor,
-            NSColor.black.cgColor
-        ] as CFArray
         let space = CGColorSpaceCreateDeviceRGB()
-        if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 0.55, 1]) {
+        let fill = [
+            NSColor(srgbRed: 0.16, green: 0.17, blue: 0.19, alpha: 1).cgColor,
+            NSColor(srgbRed: 0.085, green: 0.09, blue: 0.10, alpha: 1).cgColor,
+            NSColor(srgbRed: 0.03, green: 0.032, blue: 0.04, alpha: 1).cgColor
+        ] as CFArray
+        if let gradient = CGGradient(colorsSpace: space, colors: fill, locations: [0, 0.55, 1]) {
             context.drawLinearGradient(
                 gradient,
+                start: CGPoint(x: pill.midX, y: pill.maxY),
+                end: CGPoint(x: pill.midX, y: pill.minY),
+                options: []
+            )
+        }
+        context.restoreGState()
+
+        // Hairline highlight: convert the edge to a stroke-shaped clip and fill
+        // it with a top-biased white gradient (the classic macOS glass rim).
+        context.saveGState()
+        context.addPath(path)
+        context.setLineWidth(1)
+        context.replacePathWithStrokedPath()
+        context.clip()
+        let rim = [
+            NSColor.white.withAlphaComponent(0.16).cgColor,
+            NSColor.white.withAlphaComponent(0.05).cgColor,
+            NSColor.white.withAlphaComponent(0.01).cgColor
+        ] as CFArray
+        if let rimGradient = CGGradient(colorsSpace: space, colors: rim, locations: [0, 0.45, 1]) {
+            context.drawLinearGradient(
+                rimGradient,
                 start: CGPoint(x: pill.midX, y: pill.maxY),
                 end: CGPoint(x: pill.midX, y: pill.minY),
                 options: []

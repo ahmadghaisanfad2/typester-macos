@@ -166,7 +166,11 @@ public class OpenAIClient: STTClientBase {
             self.onFinalized?()
         }
         finalizeFallbackWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
+        // The normal completion event arrives after the commit has been
+        // processed. Keep a generous safety net for a stalled provider, but
+        // do not close the session before the transcription event has had a
+        // chance to arrive.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: workItem)
     }
 
     override func transmitAudio(_ data: Data) {
@@ -199,15 +203,14 @@ public class OpenAIClient: STTClientBase {
     }
 
     public override func sendFinalize() {
-        Debug.log("OpenAI sendFinalize(), isConnected=\(isConnected)")
-        if isConnected {
-            sendMessage(finalizeMessage()) { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.onFinalizeMessageSent()
-                }
+        enqueueOrdered { [weak self] in
+            guard let self else { return }
+            Debug.log("OpenAI sendFinalize(), isConnected=\(self.isConnected)")
+            if self.isConnected {
+                self.sendFinalizeMessage()
+            } else {
+                self.sendFinalizeInOrder()
             }
-        } else {
-            super.sendFinalize()
         }
     }
 
@@ -241,6 +244,11 @@ public class OpenAIClient: STTClientBase {
 
             case .endpoint:
                 onEndpoint?()
+
+            case .finalizeAcknowledged:
+                // OpenAI signals completion with the transcription.completed
+                // event rather than a separate finalize acknowledgement.
+                break
 
             case .finalized:
                 onFinalized?()
