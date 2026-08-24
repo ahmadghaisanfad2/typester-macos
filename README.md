@@ -55,10 +55,15 @@ Typester requires two macOS permissions:
 
 From 1.15.0 onward, Typester updates itself: menu bar icon → **Check for Updates…**
 (or Settings → Check for Updates). The update downloads, installs in place, and
-relaunches — Accessibility/microphone permissions and API keys are kept, because
-every build is signed with the same stable identity
-(`scripts/setup-signing.sh` creates it once per machine; releases fall back to
-ad-hoc signing without it, which resets permissions on every update).
+relaunches.
+
+**One-time migration from 1.15.2 or earlier:** Typester 1.16 introduced a stable
+signing identity. macOS therefore treats it as a new app once. Choose **Always
+Allow** if Keychain asks for access to your existing API key. Then open **System
+Settings → Privacy & Security → Accessibility**, remove the old Typester entry,
+add `/Applications/Typester.app`, turn it on, and relaunch Typester. Microphone
+permission may also need to be confirmed. After this migration, future releases
+signed with the same stable identity keep these grants.
 
 ## Usage
 

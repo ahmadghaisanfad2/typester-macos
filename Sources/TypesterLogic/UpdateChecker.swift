@@ -50,6 +50,27 @@ public enum UpdateVersioning {
     }
 }
 
+/// One-time migration from the ad-hoc 1.15.x identity to the stable signing
+/// identity introduced in 1.16. macOS treats that transition as a new app for
+/// Accessibility and Keychain access even though the bundle identifier is unchanged.
+public enum StableSigningMigration {
+    public static let introducedVersion = "1.16.0"
+    public static let noticeShownDefaultsKey = "stableSigningMigrationNoticeShownV1"
+
+    public static func crossesSigningIdentityBoundary(current: String, target: String) -> Bool {
+        UpdateVersioning.compare(current, introducedVersion) == .ascending
+            && UpdateVersioning.compare(target, introducedVersion) != .ascending
+    }
+
+    public static func shouldShowPostUpgradeNotice(
+        hasConfiguredAPIKey: Bool,
+        accessibilityTrusted: Bool,
+        noticeAlreadyShown: Bool
+    ) -> Bool {
+        hasConfiguredAPIKey && !accessibilityTrusted && !noticeAlreadyShown
+    }
+}
+
 public struct GitHubReleaseInfo: Equatable {
     public let tagName: String
     public let htmlURL: URL?

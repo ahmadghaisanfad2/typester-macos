@@ -5,7 +5,7 @@ set -e
 APP_NAME="Typester"
 BUNDLE_ID="com.typester.app"
 TEAM_ID="R892A93W42"
-VERSION="1.16.0"
+VERSION="1.16.1"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -164,9 +164,10 @@ elif [[ "$SIGNING_MODE" == "stable" ]]; then
     echo "    App: $APP_BUNDLE"
     echo "    DMG: $DMG_PATH"
     echo ""
-    echo "Updates installed in-app keep Accessibility/mic permissions because every"
-    echo "build shares the same designated requirement. First install of a downloaded"
-    echo "DMG may still need Right-click -> Open (unsigned/self-signed distribution)."
+    echo "Stable-signed updates after 1.16 keep Accessibility/mic permissions because"
+    echo "they share the same designated requirement. Upgrading from ad-hoc 1.15.2 or"
+    echo "earlier still requires the documented one-time Keychain and Accessibility migration."
+    echo "A downloaded DMG may also need Right-click -> Open (self-signed distribution)."
 else
     echo ""
     echo "==> Build complete (ad-hoc signed)!"

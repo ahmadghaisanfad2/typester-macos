@@ -842,7 +842,14 @@ struct SettingsView: View {
 
         let alert = NSAlert()
         alert.messageText = "Update to Typester \(latest)?"
-        alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. Your settings, API keys, and permissions are kept — no re-granting Accessibility needed."
+        if StableSigningMigration.crossesSigningIdentityBoundary(
+            current: current,
+            target: latest
+        ) {
+            alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. This update introduces a stable signing identity, so macOS requires a one-time migration: choose Always Allow if Keychain asks for your existing API key, then remove and re-add /Applications/Typester.app in Privacy & Security → Accessibility. Future updates keep these grants."
+        } else {
+            alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. Your settings and API keys stay on this Mac."
+        }
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Update Now")
         alert.addButton(withTitle: "Later")

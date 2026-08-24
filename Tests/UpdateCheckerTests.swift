@@ -23,6 +23,58 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertFalse(UpdateVersioning.isNewer(latest: "1.4.0", than: "1.5.0"))
     }
 
+    func testStableSigningMigrationBoundary() {
+        XCTAssertTrue(
+            StableSigningMigration.crossesSigningIdentityBoundary(
+                current: "1.15.2",
+                target: "1.16.1"
+            )
+        )
+        XCTAssertFalse(
+            StableSigningMigration.crossesSigningIdentityBoundary(
+                current: "1.16.0",
+                target: "1.16.1"
+            )
+        )
+        XCTAssertFalse(
+            StableSigningMigration.crossesSigningIdentityBoundary(
+                current: "1.15.2",
+                target: "1.15.3"
+            )
+        )
+    }
+
+    func testStableSigningPostUpgradeNoticeRequiresConfiguredKeyAndMissingAccess() {
+        XCTAssertTrue(
+            StableSigningMigration.shouldShowPostUpgradeNotice(
+                hasConfiguredAPIKey: true,
+                accessibilityTrusted: false,
+                noticeAlreadyShown: false
+            )
+        )
+        XCTAssertFalse(
+            StableSigningMigration.shouldShowPostUpgradeNotice(
+                hasConfiguredAPIKey: false,
+                accessibilityTrusted: false,
+                noticeAlreadyShown: false
+            )
+        )
+        XCTAssertFalse(
+            StableSigningMigration.shouldShowPostUpgradeNotice(
+                hasConfiguredAPIKey: true,
+                accessibilityTrusted: true,
+                noticeAlreadyShown: false
+            )
+        )
+        XCTAssertFalse(
+            StableSigningMigration.shouldShowPostUpgradeNotice(
+                hasConfiguredAPIKey: true,
+                accessibilityTrusted: false,
+                noticeAlreadyShown: true
+            )
+        )
+    }
+
     func testParseReleasePrefersTypesterDMG() {
         let json: [String: Any] = [
             "tag_name": "v1.5.0",
