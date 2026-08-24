@@ -396,7 +396,7 @@ struct OnboardingView: View {
     private var accessibilityStepContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                draggableAppIcon
+                DraggableAppIconTile()
 
                 Button("Open System Settings") {
                     TextPaster.openAccessibilitySettings()
@@ -409,7 +409,7 @@ struct OnboardingView: View {
             }
 
             Text(runsFromAppBundle
-                 ? "Drag the Typester icon into the list in System Settings. That's it — no plus button, no file picker."
+                 ? "Drag the Typester icon into the list in System Settings. That's it — no plus button, no file picker. Later updates keep this grant."
                  : "Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Codex.textTertiary)
@@ -417,42 +417,13 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: Drag-to-grant (Accessibility)
+    // MARK: Helpers
 
     /// True when running from a real .app bundle (a bare `swift run` binary
     /// has no bundle URL worth dragging).
     private var runsFromAppBundle: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
-
-    /// The classic "drag me into System Settings" pattern: the tile carries the
-    /// app bundle URL as drag payload, so dropping it on the Accessibility list
-    /// adds Typester directly.
-    private var draggableAppIcon: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Codex.charcoal)
-
-            if runsFromAppBundle {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 36, height: 36)
-            } else {
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Codex.mist)
-            }
-        }
-        .frame(width: 46, height: 46)
-        .overlay(HairlineBorder(cornerRadius: 10, color: Color(hex: 0x33363D)))
-        .opacity(runsFromAppBundle ? 1 : 0.5)
-        .onDrag {
-            NSItemProvider(object: Bundle.main.bundleURL as NSURL)
-        }
-        .help("Drag me into the Accessibility list")
-    }
-
-    // MARK: Helpers
 
     private func loadApiKeyForProvider() {
         switch settings.sttProvider {
