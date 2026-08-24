@@ -13,6 +13,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private let audioRecorder = AudioRecorder()
     private let textPaster = TextPaster()
+    private let automaticCorrectionMonitor = AutomaticCorrectionMonitor()
     private let historyStore = TranscriptHistoryStore.shared
     private var sttProvider: STTProvider!
     private var lastTranscript = ""
@@ -65,6 +66,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         subtitleOverlay.onCancel = { [weak self] in
             self?.cancelActiveTranscription()
         }
+        textPaster.onPasteObserved = { [weak self] observation in
+            guard SettingsStore.shared.automaticDictionaryLearningEnabled else { return }
+            self?.automaticCorrectionMonitor.begin(observation)
+        }
+        automaticCorrectionMonitor.onCorrections = { corrections in
+            for correction in corrections {
+                SettingsStore.shared.addAutomaticCorrection(
+                    wrong: correction.wrong,
+                    right: correction.right
+                )
+            }
+        }
     }
 
     // MARK: - App lifecycle
@@ -86,6 +99,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self,
             selector: #selector(settingsChanged),
             name: .settingsChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(automaticDictionaryLearningChanged),
+            name: .automaticDictionaryLearningChanged,
             object: nil
         )
 
@@ -143,7 +162,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let fake = env["TYPESTER_FAKE_TRANSCRIPT"], !fake.isEmpty {
             lastTranscript = fake
         }
-
         if let dmgPath = env["TYPESTER_INSTALL_UPDATE"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 Debug.log("TYPESTER_INSTALL_UPDATE: installing from \(dmgPath)")
@@ -269,6 +287,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateSTTProvider()
         rebuildMenu()
         updateActivationPolicy()
+    }
+
+    @objc private func automaticDictionaryLearningChanged() {
+        if !SettingsStore.shared.automaticDictionaryLearningEnabled {
+            automaticCorrectionMonitor.cancel()
+        }
     }
 
     /// Keep the Dock presence in sync with the "Show in Dock" setting.
@@ -1101,7 +1125,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let replaced = SettingsStore.shared.applyReplacements(text)
             let formatted = TranscriptFormatter.format(replaced)
             let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
-            textPaster.paste(pasteText)
+            textPaster.paste(
+                pasteText,
+                observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled
+            )
             let stored = pasteText.trimmingCharacters(in: .whitespacesAndNewlines)
             if sessionPastedText.isEmpty {
                 sessionPastedText = stored

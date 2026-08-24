@@ -8,6 +8,8 @@ public class TextPaster {
     /// Optional hook invoked around synthetic ⌘V so press-to-speak monitors can ignore it.
     public var onPasteSimulationBegin: (() -> Void)?
     public var onPasteSimulationEnd: (() -> Void)?
+    /// Called only when an explicitly observed paste can be verified in a non-secure text field.
+    public var onPasteObserved: ((PasteObservation) -> Void)?
 
     // MARK: - Accessibility
 
@@ -42,16 +44,24 @@ public class TextPaster {
 
     /// Pastes text into the focused field. Returns false if accessibility is missing or text is empty.
     @discardableResult
-    public func paste(_ text: String) -> Bool {
+    public func paste(_ text: String, observeCorrections: Bool = false) -> Bool {
         guard !text.isEmpty else { return false }
 
         guard TextPaster.checkAccessibilityPermission() else {
+            Debug.log("Paste blocked: Accessibility permission is not active for this build")
             TextPaster.requestAccessibilityPermission()
             return false
         }
 
+        // Capturing may fail for unsupported controls and intentionally always fails for
+        // secure fields. Paste still proceeds; only automatic learning is disabled.
+        let pasteTarget = observeCorrections ? AccessibilityPasteTarget.captureFocused() : nil
+
         // Electron/Cursor often reports AX success without inserting — skip AX there.
         if !prefersCommandVPaste(), insertTextViaAccessibility(text) {
+            if let observation = pasteTarget?.makeObservation(insertedText: text) {
+                onPasteObserved?(observation)
+            }
             return true
         }
 
@@ -74,6 +84,9 @@ public class TextPaster {
             guard let self else { return }
             self.simulatePaste()
             self.onPasteSimulationEnd?()
+            if let pasteTarget {
+                self.observeCommandVPaste(target: pasteTarget, text: text, remainingAttempts: 8)
+            }
 
             // Electron (Cursor) needs a longer window than native AppKit fields.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -90,6 +103,25 @@ public class TextPaster {
             }
         }
         return true
+    }
+
+    private func observeCommandVPaste(
+        target: AccessibilityPasteTarget,
+        text: String,
+        remainingAttempts: Int
+    ) {
+        if let observation = target.makeObservation(insertedText: text) {
+            onPasteObserved?(observation)
+            return
+        }
+        guard remainingAttempts > 1 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.075) { [weak self] in
+            self?.observeCommandVPaste(
+                target: target,
+                text: text,
+                remainingAttempts: remainingAttempts - 1
+            )
+        }
     }
 
     private func insertTextViaAccessibility(_ text: String) -> Bool {

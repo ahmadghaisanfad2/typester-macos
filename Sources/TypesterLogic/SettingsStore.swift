@@ -4,6 +4,7 @@ import Security
 
 public extension Notification.Name {
     static let settingsChanged = Notification.Name("settingsChanged")
+    static let automaticDictionaryLearningChanged = Notification.Name("automaticDictionaryLearningChanged")
 }
 
 public class SettingsStore: ObservableObject {
@@ -61,6 +62,16 @@ public class SettingsStore: ObservableObject {
     @Published public var correctionPairs: [CorrectionPair] = [] {
         didSet {
             saveCorrectionPairs()
+        }
+    }
+
+    @Published public var automaticDictionaryLearningEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                automaticDictionaryLearningEnabled,
+                forKey: automaticDictionaryLearningEnabledKey
+            )
+            NotificationCenter.default.post(name: .automaticDictionaryLearningChanged, object: nil)
         }
     }
 
@@ -149,6 +160,7 @@ public class SettingsStore: ObservableObject {
     private let selectedMicrophoneKey = "selectedMicrophone"
     private let dictionaryTermsKey = "dictionaryTerms"
     private let correctionPairsKey = "correctionPairs"
+    private let automaticDictionaryLearningEnabledKey = "automaticDictionaryLearningEnabled"
     private let contextDomainKey = "contextDomain"
     private let contextTopicKey = "contextTopic"
     private let showStreamPreviewKey = "showStreamPreview"
@@ -170,6 +182,7 @@ public class SettingsStore: ObservableObject {
         loadSelectedMicrophone()
         loadDictionaryTerms()
         loadCorrectionPairs()
+        loadAutomaticDictionaryLearningPreference()
         loadContextDomain()
         loadContextTopic()
         loadSTTProvider()
@@ -196,6 +209,27 @@ public class SettingsStore: ObservableObject {
 
     public func removeCorrection(id: UUID) {
         correctionPairs.removeAll { $0.id == id }
+    }
+
+    @discardableResult
+    public func addAutomaticCorrection(wrong: String, right: String) -> Bool {
+        guard automaticDictionaryLearningEnabled,
+              let updated = DictionaryHelpers.upsertCorrection(
+                wrong: wrong,
+                right: right,
+                into: correctionPairs,
+                source: .automatic,
+                matchMode: .wordOrPhrase
+              ),
+              updated != correctionPairs else {
+            return false
+        }
+        correctionPairs = updated
+        return true
+    }
+
+    public func clearAutomaticCorrections() {
+        correctionPairs.removeAll { $0.source == .automatic }
     }
 
     public func applyReplacements(_ text: String) -> String {
@@ -309,6 +343,14 @@ public class SettingsStore: ObservableObject {
     private func saveCorrectionPairs() {
         guard let data = try? JSONEncoder().encode(correctionPairs) else { return }
         UserDefaults.standard.set(data, forKey: correctionPairsKey)
+    }
+
+    private func loadAutomaticDictionaryLearningPreference() {
+        if UserDefaults.standard.object(forKey: automaticDictionaryLearningEnabledKey) != nil {
+            automaticDictionaryLearningEnabled = UserDefaults.standard.bool(
+                forKey: automaticDictionaryLearningEnabledKey
+            )
+        }
     }
 
     private func loadContextDomain() {
