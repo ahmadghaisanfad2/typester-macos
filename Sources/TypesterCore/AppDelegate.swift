@@ -108,12 +108,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             object: nil
         )
 
-        // Show onboarding if selected provider has no API key
-        if !hasAPIKeyForCurrentProvider() {
+        // Show onboarding if selected provider has no API key. Reading the
+        // existing key may trigger macOS's one-time Keychain prompt after the
+        // stable-signing migration; the follow-up notice explains that prompt.
+        // QA-only environment hooks bypass that read so the migration notice
+        // and paste-learning path can be verified without modifying Keychain.
+        let environment = ProcessInfo.processInfo.environment
+        let isQALaunch = environment["TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE"] == "1"
+            || environment["TYPESTER_QA_PASTE"] != nil
+        let hasConfiguredAPIKey = isQALaunch || hasAPIKeyForCurrentProvider()
+        if !hasConfiguredAPIKey {
             showOnboarding()
         } else {
             updateMonitoringMode()
         }
+        scheduleStableSigningMigrationNoticeIfNeeded(
+            hasConfiguredAPIKey: hasConfiguredAPIKey
+        )
 
         // Do not touch the activation policy at launch unless the Dock
         // setting requires promoting from the LSUIElement default. Flipping
@@ -152,6 +163,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
     /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting,
     /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png,
+    /// TYPESTER_QA_PASTE=… (exercise the real paste/learning path after launch),
+    /// TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE=1 (render the migration alert),
     /// TYPESTER_INSTALL_UPDATE=/path/to/Typester-x.y.z.dmg (self-update E2E test).
     private func applyDebugOverrides() {
         let env = ProcessInfo.processInfo.environment
@@ -161,6 +174,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if let fake = env["TYPESTER_FAKE_TRANSCRIPT"], !fake.isEmpty {
             lastTranscript = fake
+        }
+        if let qaPaste = env["TYPESTER_QA_PASTE"], !qaPaste.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.textPaster.paste(qaPaste, observeCorrections: true)
+            }
         }
         if let dmgPath = env["TYPESTER_INSTALL_UPDATE"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -279,6 +297,53 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .openai:
             return SettingsStore.shared.openaiApiKey != nil
         }
+    }
+
+    private func scheduleStableSigningMigrationNoticeIfNeeded(hasConfiguredAPIKey: Bool) {
+        let defaults = UserDefaults.standard
+        let forceNotice = ProcessInfo.processInfo.environment[
+            "TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE"
+        ] == "1"
+        guard StableSigningMigration.shouldShowPostUpgradeNotice(
+            hasConfiguredAPIKey: hasConfiguredAPIKey || forceNotice,
+            accessibilityTrusted: forceNotice
+                ? false
+                : TextPaster.checkAccessibilityPermission(),
+            noticeAlreadyShown: forceNotice
+                ? false
+                : defaults.bool(forKey: StableSigningMigration.noticeShownDefaultsKey)
+        ) else { return }
+
+        // Mark before scheduling so a second launch cannot enqueue a duplicate.
+        if !forceNotice {
+            defaults.set(true, forKey: StableSigningMigration.noticeShownDefaultsKey)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.showStableSigningMigrationNotice()
+        }
+    }
+
+    private func showStableSigningMigrationNotice() {
+        let alert = NSAlert()
+        alert.messageText = "Finish the one-time Typester upgrade"
+        alert.informativeText = "Typester 1.16 uses a stable signing identity, so macOS treats it as a new app once. If Keychain asks, choose Always Allow so Typester can read your existing API key. Then open Accessibility settings, remove the old Typester entry if present, add /Applications/Typester.app, turn it on, and relaunch Typester."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Later")
+
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.level = .floating
+        alert.window.center()
+        alert.window.makeKeyAndOrderFront(nil)
+        alert.window.orderFrontRegardless()
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            TextPaster.openAccessibilitySettings()
+        }
+        updateActivationPolicy()
     }
 
     @objc private func settingsChanged() {

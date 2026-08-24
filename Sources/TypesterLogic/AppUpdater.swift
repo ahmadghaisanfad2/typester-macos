@@ -73,10 +73,10 @@ public enum UpdateCheckSchedule {
 /// Installs GitHub-release DMG updates over the running app:
 /// download → mount → validate → atomic replace → strip quarantine → relaunch.
 ///
-/// Because every release is signed with the same stable identity
-/// (scripts/setup-signing.sh), the replaced app keeps its TCC grants
-/// (Accessibility, microphone) and the Keychain API keys — no permission
-/// re-grants after updates.
+/// Releases from 1.16 onward share the stable identity created by
+/// scripts/setup-signing.sh, so grants survive subsequent updates. The one-time
+/// transition from the ad-hoc 1.15.x identity requires Keychain approval and a
+/// fresh Accessibility grant because macOS treats it as a different app identity.
 public final class AppUpdater: NSObject {
     public static let shared = AppUpdater()
 
