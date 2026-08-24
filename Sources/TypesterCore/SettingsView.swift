@@ -846,7 +846,7 @@ struct SettingsView: View {
             current: current,
             target: latest
         ) {
-            alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. This update introduces a stable signing identity, so macOS requires a one-time migration: choose Always Allow if Keychain asks for your existing API key, then remove and re-add /Applications/Typester.app in Privacy & Security → Accessibility. Future updates keep these grants."
+            alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. This update introduces a stable signing identity, so the old authorization does not transfer automatically. \(StableSigningMigration.keychainAuthorizationGuidance) Then remove and re-add /Applications/Typester.app in Privacy & Security → Accessibility. Future updates keep these grants."
         } else {
             alert.informativeText = "Typester downloads the update, installs it in place, and relaunches. Your settings and API keys stay on this Mac."
         }

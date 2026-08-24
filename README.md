@@ -58,12 +58,13 @@ From 1.15.0 onward, Typester updates itself: menu bar icon → **Check for Updat
 relaunches.
 
 **One-time migration from 1.15.2 or earlier:** Typester 1.16 introduced a stable
-signing identity. macOS therefore treats it as a new app once. Choose **Always
-Allow** if Keychain asks for access to your existing API key. Then open **System
-Settings → Privacy & Security → Accessibility**, remove the old Typester entry,
-add `/Applications/Typester.app`, turn it on, and relaunch Typester. Microphone
-permission may also need to be confirmed. After this migration, future releases
-signed with the same stable identity keep these grants.
+signing identity, so the old Keychain and Accessibility authorization does not
+transfer automatically. When Keychain asks about your existing API key, enter
+your **Mac login password** and click **Always Allow** (not Allow Once). Then open
+**System Settings → Privacy & Security → Accessibility**, remove the old Typester
+entry, add `/Applications/Typester.app`, turn it on, and relaunch Typester.
+Microphone permission may also need to be confirmed. After both migration steps,
+future releases signed with the same stable identity keep these grants.
 
 ## Usage
 

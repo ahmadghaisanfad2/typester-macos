@@ -56,6 +56,7 @@ public enum UpdateVersioning {
 public enum StableSigningMigration {
     public static let introducedVersion = "1.16.0"
     public static let noticeShownDefaultsKey = "stableSigningMigrationNoticeShownV1"
+    public static let keychainAuthorizationGuidance = "When Keychain asks about your existing API key, enter your Mac login password and click Always Allow (not Allow Once)."
 
     public static func crossesSigningIdentityBoundary(current: String, target: String) -> Bool {
         UpdateVersioning.compare(current, introducedVersion) == .ascending

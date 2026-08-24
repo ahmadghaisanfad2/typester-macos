@@ -68,8 +68,17 @@ Local release built with \`scripts/build-release.sh\` and published with \`scrip
 ### Updating
 Already running Typester 1.15.0 or newer? Update from the app itself — menu bar
 icon → Check for Updates… (or Settings → Check for Updates). The update installs
-in place and relaunches; Accessibility/microphone permissions and API keys are
-kept automatically.
+in place and relaunches.
+
+When upgrading from 1.15.2 or earlier, the old authorization does not transfer
+automatically. Complete both one-time steps:
+
+1. In the Keychain prompt, enter your Mac login password and click **Always
+   Allow** (not Allow Once) for the existing API key.
+2. In System Settings → Privacy & Security → Accessibility, remove the old
+   Typester entry, add /Applications/Typester.app, enable it, and relaunch.
+
+Future releases signed with the same stable identity keep these grants.
 EOF
 
 if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then

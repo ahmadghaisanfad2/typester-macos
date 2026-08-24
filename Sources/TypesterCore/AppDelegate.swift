@@ -326,7 +326,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showStableSigningMigrationNotice() {
         let alert = NSAlert()
         alert.messageText = "Finish the one-time Typester upgrade"
-        alert.informativeText = "Typester 1.16 uses a stable signing identity, so macOS treats it as a new app once. If Keychain asks, choose Always Allow so Typester can read your existing API key. Then open Accessibility settings, remove the old Typester entry if present, add /Applications/Typester.app, turn it on, and relaunch Typester."
+        alert.informativeText = "Typester 1.16 uses a stable signing identity, so the old authorization does not transfer automatically. \(StableSigningMigration.keychainAuthorizationGuidance) Then open Accessibility settings, remove the old Typester entry if present, add /Applications/Typester.app, turn it on, and relaunch Typester."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Open Accessibility Settings")
         alert.addButton(withTitle: "Later")

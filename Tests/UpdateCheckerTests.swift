@@ -75,6 +75,18 @@ final class UpdateCheckerTests: XCTestCase {
         )
     }
 
+    func testStableSigningGuidanceIncludesObservedKeychainActions() {
+        XCTAssertTrue(
+            StableSigningMigration.keychainAuthorizationGuidance.contains("Mac login password")
+        )
+        XCTAssertTrue(
+            StableSigningMigration.keychainAuthorizationGuidance.contains("Always Allow")
+        )
+        XCTAssertTrue(
+            StableSigningMigration.keychainAuthorizationGuidance.contains("not Allow Once")
+        )
+    }
+
     func testParseReleasePrefersTypesterDMG() {
         let json: [String: Any] = [
             "tag_name": "v1.5.0",
