@@ -701,8 +701,8 @@ struct SettingsView: View {
             SettingsRow(
                 "Accessibility",
                 help: accessibilityGranted
-                    ? "Needed to paste text into other apps."
-                    : "If the toggle is already on, remove Typester from the Accessibility list, add /Applications/Typester.app again, turn it on, then Relaunch. macOS does not apply a new grant until Typester restarts.",
+                    ? "Needed to paste text into other apps. Later updates keep this grant."
+                    : "Drag the Typester icon into Privacy & Security → Accessibility. If the toggle is already on, remove Typester first, drop the icon in, then Relaunch — macOS does not apply a new grant until Typester restarts.",
                 showsDivider: false
             ) {
                 HStack(spacing: 8) {
@@ -713,6 +713,8 @@ struct SettingsView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(Codex.textSecondary)
                     } else {
+                        DraggableAppIconTile()
+
                         Button("Open System Settings") {
                             TextPaster.openAccessibilitySettings()
                         }
