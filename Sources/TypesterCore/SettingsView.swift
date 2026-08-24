@@ -461,12 +461,25 @@ struct SettingsView: View {
                 SettingsRow(
                     "Learn from corrections",
                     help: "Automatically save short word or phrase corrections you make immediately after dictation.",
-                    showsDivider: false
+                    showsDivider: settings.showLearningHUD
                 ) {
                     Toggle("", isOn: $settings.automaticDictionaryLearningEnabled)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .tint(Codex.green)
+                }
+
+                if settings.automaticDictionaryLearningEnabled {
+                    SettingsRow(
+                        "Show learned toast",
+                        help: "Briefly show a small confirmation when a correction is saved.",
+                        showsDivider: false
+                    ) {
+                        Toggle("", isOn: $settings.showLearningHUD)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .tint(Codex.green)
+                    }
                 }
             }
 

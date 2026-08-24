@@ -75,6 +75,12 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var showLearningHUD: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showLearningHUD, forKey: showLearningHUDKey)
+        }
+    }
+
     @Published public var contextDomain: String = "" {
         didSet {
             saveContextDomain()
@@ -161,6 +167,7 @@ public class SettingsStore: ObservableObject {
     private let dictionaryTermsKey = "dictionaryTerms"
     private let correctionPairsKey = "correctionPairs"
     private let automaticDictionaryLearningEnabledKey = "automaticDictionaryLearningEnabled"
+    private let showLearningHUDKey = "showLearningHUD"
     private let contextDomainKey = "contextDomain"
     private let contextTopicKey = "contextTopic"
     private let showStreamPreviewKey = "showStreamPreview"
@@ -183,6 +190,7 @@ public class SettingsStore: ObservableObject {
         loadDictionaryTerms()
         loadCorrectionPairs()
         loadAutomaticDictionaryLearningPreference()
+        loadShowLearningHUDPreference()
         loadContextDomain()
         loadContextTopic()
         loadSTTProvider()
@@ -350,6 +358,12 @@ public class SettingsStore: ObservableObject {
             automaticDictionaryLearningEnabled = UserDefaults.standard.bool(
                 forKey: automaticDictionaryLearningEnabledKey
             )
+        }
+    }
+
+    private func loadShowLearningHUDPreference() {
+        if UserDefaults.standard.object(forKey: showLearningHUDKey) != nil {
+            showLearningHUD = UserDefaults.standard.bool(forKey: showLearningHUDKey)
         }
     }
 

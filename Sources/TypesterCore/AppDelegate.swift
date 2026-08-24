@@ -71,12 +71,20 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.automaticCorrectionMonitor.begin(observation)
         }
         automaticCorrectionMonitor.onCorrections = { corrections in
+            var learned: [DetectedCorrection] = []
             for correction in corrections {
-                SettingsStore.shared.addAutomaticCorrection(
+                if SettingsStore.shared.addAutomaticCorrection(
                     wrong: correction.wrong,
                     right: correction.right
-                )
+                ) {
+                    learned.append(correction)
+                }
             }
+            // Only confirm corrections that actually entered the dictionary;
+            // duplicates stay silent. The toast itself is optional.
+            guard !learned.isEmpty,
+                  SettingsStore.shared.showLearningHUD else { return }
+            LearningHUD.shared.show(corrections: learned)
         }
     }
 
