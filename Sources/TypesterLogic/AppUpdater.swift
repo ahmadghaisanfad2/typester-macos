@@ -75,8 +75,9 @@ public enum UpdateCheckSchedule {
 ///
 /// Releases from 1.16 onward share the stable identity created by
 /// scripts/setup-signing.sh, so grants survive subsequent updates. The one-time
-/// transition from the ad-hoc 1.15.x identity requires Keychain approval and a
-/// fresh Accessibility grant because macOS treats it as a different app identity.
+/// transition from the ad-hoc 1.15.x identity requires the user's Mac login
+/// password plus Always Allow in Keychain, and a fresh Accessibility grant,
+/// because macOS treats it as a different app identity.
 public final class AppUpdater: NSObject {
     public static let shared = AppUpdater()
 
