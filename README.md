@@ -22,6 +22,7 @@ Features:
 - **Multilingual** — Soniox/OpenAI: language hints; Deepgram: auto-detects with multilingual model
 - **Microphone selection** — Choose your preferred input device from the menu
 - **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox context / OpenAI keywords)
+- **Automatic dictionary learning** — Correct a recently pasted transcript and Typester saves safe word/phrase corrections locally for future dictation
 - **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed provider hints
 - **Domain / topic context** — Optional context fields in Settings for better domain bias
 - **Check for Updates** — Compare against your fork’s GitHub Releases and download the latest DMG

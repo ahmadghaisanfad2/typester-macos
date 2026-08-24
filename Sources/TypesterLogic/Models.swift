@@ -2,17 +2,60 @@ import Cocoa
 
 public let appVersion = "1.15.2"
 
+public enum CorrectionSource: String, Codable, Equatable {
+    case taught
+    case automatic
+}
+
+public enum CorrectionMatchMode: String, Codable, Equatable {
+    case literal
+    case wordOrPhrase
+}
+
 public struct CorrectionPair: Codable, Equatable, Identifiable {
     public var id: UUID
     public var wrong: String
     public var right: String
     public var createdAt: Date
+    public var source: CorrectionSource
+    public var matchMode: CorrectionMatchMode
+    public var observationCount: Int
+    public var lastObservedAt: Date
 
-    public init(id: UUID = UUID(), wrong: String, right: String, createdAt: Date = Date()) {
+    public init(
+        id: UUID = UUID(),
+        wrong: String,
+        right: String,
+        createdAt: Date = Date(),
+        source: CorrectionSource = .taught,
+        matchMode: CorrectionMatchMode = .literal,
+        observationCount: Int = 1,
+        lastObservedAt: Date? = nil
+    ) {
         self.id = id
         self.wrong = wrong
         self.right = right
         self.createdAt = createdAt
+        self.source = source
+        self.matchMode = matchMode
+        self.observationCount = max(1, observationCount)
+        self.lastObservedAt = lastObservedAt ?? createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, wrong, right, createdAt, source, matchMode, observationCount, lastObservedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        wrong = try container.decode(String.self, forKey: .wrong)
+        right = try container.decode(String.self, forKey: .right)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        source = try container.decodeIfPresent(CorrectionSource.self, forKey: .source) ?? .taught
+        matchMode = try container.decodeIfPresent(CorrectionMatchMode.self, forKey: .matchMode) ?? .literal
+        observationCount = max(1, try container.decodeIfPresent(Int.self, forKey: .observationCount) ?? 1)
+        lastObservedAt = try container.decodeIfPresent(Date.self, forKey: .lastObservedAt) ?? createdAt
     }
 }
 
@@ -28,7 +71,20 @@ public enum DictionaryHelpers {
 
         var result = text
         for pair in sorted {
-            result = result.replacingOccurrences(of: pair.wrong, with: pair.right)
+            switch pair.matchMode {
+            case .literal:
+                result = result.replacingOccurrences(of: pair.wrong, with: pair.right)
+            case .wordOrPhrase:
+                let escaped = NSRegularExpression.escapedPattern(for: pair.wrong)
+                let pattern = "(?<![\\p{L}\\p{N}])\(escaped)(?![\\p{L}\\p{N}])"
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                let range = NSRange(location: 0, length: (result as NSString).length)
+                result = regex.stringByReplacingMatches(
+                    in: result,
+                    range: range,
+                    withTemplate: NSRegularExpression.escapedTemplate(for: pair.right)
+                )
+            }
         }
         return result
     }
@@ -51,6 +107,8 @@ public enum DictionaryHelpers {
         wrong: String,
         right: String,
         into pairs: [CorrectionPair],
+        source: CorrectionSource = .taught,
+        matchMode: CorrectionMatchMode = .literal,
         maxPairs: Int = maxCorrectionPairs
     ) -> [CorrectionPair]? {
         let wrongTrimmed = wrong.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,10 +119,23 @@ public enum DictionaryHelpers {
 
         var updated = pairs
         if let index = updated.firstIndex(where: { $0.wrong == wrongTrimmed }) {
+            if source == .automatic, updated[index].source == .taught {
+                return updated[index].right == rightTrimmed ? updated : nil
+            }
             updated[index].right = rightTrimmed
-            updated[index].createdAt = Date()
+            updated[index].lastObservedAt = Date()
+            updated[index].observationCount += 1
+            if source == .taught {
+                updated[index].source = .taught
+                updated[index].matchMode = .literal
+            }
         } else {
-            updated.append(CorrectionPair(wrong: wrongTrimmed, right: rightTrimmed))
+            updated.append(CorrectionPair(
+                wrong: wrongTrimmed,
+                right: rightTrimmed,
+                source: source,
+                matchMode: matchMode
+            ))
         }
 
         if updated.count > maxPairs {

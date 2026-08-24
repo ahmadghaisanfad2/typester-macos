@@ -453,25 +453,41 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var dictionarySection: some View {
-        if settings.sttProvider == .deepgram {
-            SettingsSection("Dictionary") {
-                HStack(spacing: 10) {
-                    Image(systemName: "info")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Codex.textTertiary)
-                        .frame(width: 17)
-
-                    Text("Dictionary hints and context apply to Soniox and OpenAI. Deepgram's multilingual model detects vocabulary on its own.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Codex.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsSection(
+                "Automatic learning",
+                footer: "Typester watches only the text range it just pasted, for up to 30 seconds. Corrections stay on this Mac. Password and other secure fields are never observed."
+            ) {
+                SettingsRow(
+                    "Learn from corrections",
+                    help: "Automatically save short word or phrase corrections you make immediately after dictation.",
+                    showsDivider: false
+                ) {
+                    Toggle("", isOn: $settings.automaticDictionaryLearningEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
                 }
-                .padding(14)
             }
-        } else {
-            VStack(alignment: .leading, spacing: 22) {
+
+            if settings.sttProvider == .deepgram {
+                SettingsSection("Deepgram behavior") {
+                    HStack(spacing: 10) {
+                        Image(systemName: "info")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Codex.textTertiary)
+                            .frame(width: 17)
+
+                        Text("Learned corrections still replace matching words locally before paste. Deepgram does not receive Typester dictionary hints.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Codex.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                }
+            } else {
                 SettingsSection(
                     "Context",
                     footer: settings.sttProvider == .openai
@@ -493,56 +509,85 @@ struct SettingsView: View {
                     }
                 }
 
+                dictionaryTermsSection
+            }
+
+            if !settings.correctionPairs.isEmpty {
                 SettingsSection(
-                    "Dictionary terms",
-                    footer: "Add domain-specific words, names, or technical terms to improve recognition accuracy."
+                    "Corrections",
+                    footer: correctionFooter
                 ) {
-                    if settings.dictionaryTerms.isEmpty {
+                    ForEach(Array(settings.correctionPairs.enumerated()), id: \.element.id) { index, pair in
+                        correctionRow(
+                            pair,
+                            showsDivider: index < settings.correctionPairs.count - 1
+                                || settings.correctionPairs.contains(where: { $0.source == .automatic })
+                        )
+                    }
+
+                    if settings.correctionPairs.contains(where: { $0.source == .automatic }) {
                         HStack {
-                            Text("No terms yet. Add the names and jargon you dictate often.")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(Codex.textTertiary)
-                            Spacer(minLength: 0)
+                            Spacer()
+                            Button("Clear automatic corrections") {
+                                settings.clearAutomaticCorrections()
+                            }
+                            .controlSize(.small)
                         }
-                        .padding(14)
-
-                        Rectangle()
-                            .fill(Codex.hairline)
-                            .frame(height: 1)
-                            .padding(.leading, 14)
-                    } else {
-                        ForEach(Array(settings.dictionaryTerms.enumerated()), id: \.element) { index, term in
-                            termRow(term, showsDivider: index < settings.dictionaryTerms.count - 1)
-                        }
-                    }
-
-                    HStack {
-                        Spacer()
-                        Button {
-                            showingAddTerm = true
-                        } label: {
-                            Label("Add term", systemImage: "plus")
-                                .font(.system(size: 12))
-                        }
-                        .controlSize(.small)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                    }
-                    .padding(.horizontal, 14)
-                }
-
-                if !settings.correctionPairs.isEmpty {
-                    SettingsSection(
-                        "Corrections",
-                        footer: settings.sttProvider == .openai
-                            ? "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent as OpenAI keywords."
-                            : "Learned from Teach last transcript…. Wrong words are replaced before paste; correct terms are sent to Soniox."
-                    ) {
-                        ForEach(Array(settings.correctionPairs.enumerated()), id: \.element.id) { index, pair in
-                            correctionRow(pair, showsDivider: index < settings.correctionPairs.count - 1)
-                        }
                     }
                 }
             }
+        }
+    }
+
+    private var dictionaryTermsSection: some View {
+        SettingsSection(
+            "Dictionary terms",
+            footer: "Add domain-specific words, names, or technical terms to improve recognition accuracy."
+        ) {
+            if settings.dictionaryTerms.isEmpty {
+                HStack {
+                    Text("No terms yet. Add the names and jargon you dictate often.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Codex.textTertiary)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+
+                Rectangle()
+                    .fill(Codex.hairline)
+                    .frame(height: 1)
+                    .padding(.leading, 14)
+            } else {
+                ForEach(Array(settings.dictionaryTerms.enumerated()), id: \.element) { index, term in
+                    termRow(term, showsDivider: index < settings.dictionaryTerms.count - 1)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    showingAddTerm = true
+                } label: {
+                    Label("Add term", systemImage: "plus")
+                        .font(.system(size: 12))
+                }
+                .controlSize(.small)
+                .padding(.vertical, 10)
+            }
+            .padding(.horizontal, 14)
+        }
+    }
+
+    private var correctionFooter: String {
+        switch settings.sttProvider {
+        case .openai:
+            return "Words are replaced locally before paste; correct terms are also sent as OpenAI keywords."
+        case .soniox:
+            return "Words are replaced locally before paste; correct terms are also sent to Soniox."
+        case .deepgram:
+            return "Words are replaced locally before paste. Deepgram does not receive dictionary hints."
         }
     }
 
@@ -588,6 +633,16 @@ struct SettingsView: View {
                 }
                 .font(.mono(12))
                 .lineLimit(1)
+
+                Text(pair.source == .automatic ? "Automatic" : "Taught")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(pair.source == .automatic ? Codex.green : Codex.textTertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(pair.source == .automatic ? Codex.green.opacity(0.12) : Codex.surface)
+                    )
 
                 Spacer()
 
