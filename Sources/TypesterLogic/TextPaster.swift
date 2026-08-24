@@ -55,7 +55,18 @@ public class TextPaster {
 
         // Capturing may fail for unsupported controls and intentionally always fails for
         // secure fields. Paste still proceeds; only automatic learning is disabled.
-        let pasteTarget = observeCorrections ? AccessibilityPasteTarget.captureFocused() : nil
+        var pasteTarget = observeCorrections ? AccessibilityPasteTarget.captureFocused() : nil
+        if pasteTarget == nil, observeCorrections {
+            // One short retry: some hosts expose their AX tree slightly late.
+            let deadline = Date().addingTimeInterval(0.1)
+            while pasteTarget == nil, Date() < deadline {
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.025))
+                pasteTarget = AccessibilityPasteTarget.captureFocused()
+            }
+            if pasteTarget == nil {
+                Debug.log("Automatic learning target capture failed; pasting without observation")
+            }
+        }
 
         // Electron/Cursor often reports AX success without inserting — skip AX there.
         if !prefersCommandVPaste(), insertTextViaAccessibility(text) {
@@ -85,7 +96,7 @@ public class TextPaster {
             self.simulatePaste()
             self.onPasteSimulationEnd?()
             if let pasteTarget {
-                self.observeCommandVPaste(target: pasteTarget, text: text, remainingAttempts: 8)
+                self.observeCommandVPaste(target: pasteTarget, text: text, remainingAttempts: 24)
             }
 
             // Electron (Cursor) needs a longer window than native AppKit fields.

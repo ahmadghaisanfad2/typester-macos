@@ -1250,7 +1250,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               let entry = historyStore.entries.first(where: { $0.id == id }),
               entry.hasText else { return }
         let pasteText = entry.text.hasSuffix(" ") ? entry.text : entry.text + " "
-        textPaster.paste(pasteText)
+        textPaster.paste(
+            pasteText,
+            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled
+        )
     }
 
     @objc private func copyHistoryEntry(_ sender: NSMenuItem) {
@@ -1387,7 +1390,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let replaced = SettingsStore.shared.applyReplacements(text)
         let formatted = TranscriptFormatter.format(replaced)
         let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
-        textPaster.paste(pasteText)
+        textPaster.paste(
+            pasteText,
+            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled
+        )
 
         if let id = retranscribeEntryID,
            var entry = historyStore.entries.first(where: { $0.id == id }) {
