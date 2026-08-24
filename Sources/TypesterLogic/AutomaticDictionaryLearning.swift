@@ -283,10 +283,25 @@ public struct PasteObservation {
 public final class AutomaticCorrectionMonitor {
     public var onCorrections: (([DetectedCorrection]) -> Void)?
 
+    /// QA/testing hook: skip AXObserver registration so value tracking can
+    /// only succeed through the polling fallback.
+    public static var skipsChangeNotifications: Bool = {
+        ProcessInfo.processInfo.environment["TYPESTER_LEARNING_POLL_ONLY"] == "1"
+    }()
+
+    /// How often to poll the field value while a learning session is active.
+    /// Some hosts (Electron, webviews, SwiftUI text controls) never deliver
+    /// kAXValueChangedNotification, so notifications alone are not enough.
+    private static let pollInterval: TimeInterval = 0.4
+    /// Learning sessions stay alive long enough for the user to read the
+    /// pasted transcript before fixing it.
+    private static let sessionTimeout: TimeInterval = 150
+
     private var observation: PasteObservation?
     private var tracker: PastedTextTracker?
     private var observer: AXObserver?
     private var applicationElement: AXUIElement?
+    private var pollTimer: DispatchSourceTimer?
     private var debounceWorkItem: DispatchWorkItem?
     private var timeoutWorkItem: DispatchWorkItem?
     private var lastEmitted: [DetectedCorrection] = []
@@ -307,57 +322,60 @@ public final class AutomaticCorrectionMonitor {
             range: observation.insertedRange
         )
 
-        var createdObserver: AXObserver?
-        let result = AXObserverCreate(observation.processID, { _, _, notification, refcon in
-            guard let refcon else { return }
-            let monitor = Unmanaged<AutomaticCorrectionMonitor>.fromOpaque(refcon).takeUnretainedValue()
-            DispatchQueue.main.async {
-                monitor.handle(notification: notification as String)
+        if Self.skipsChangeNotifications {
+            Debug.log("Automatic learning running in poll-only mode")
+        } else {
+            var createdObserver: AXObserver?
+            let result = AXObserverCreate(observation.processID, { _, _, notification, refcon in
+                guard let refcon else { return }
+                let monitor = Unmanaged<AutomaticCorrectionMonitor>.fromOpaque(refcon).takeUnretainedValue()
+                DispatchQueue.main.async {
+                    monitor.handle(notification: notification as String)
+                }
+            }, &createdObserver)
+
+            if result == .success, let createdObserver {
+                let refcon = Unmanaged.passUnretained(self).toOpaque()
+                let valueResult = AXObserverAddNotification(
+                    createdObserver,
+                    observation.element,
+                    kAXValueChangedNotification as CFString,
+                    refcon
+                )
+                if valueResult == .success {
+                    let appElement = AXUIElementCreateApplication(observation.processID)
+                    _ = AXObserverAddNotification(
+                        createdObserver,
+                        appElement,
+                        kAXFocusedUIElementChangedNotification as CFString,
+                        refcon
+                    )
+
+                    observer = createdObserver
+                    applicationElement = appElement
+                    CFRunLoopAddSource(
+                        CFRunLoopGetMain(),
+                        AXObserverGetRunLoopSource(createdObserver),
+                        .commonModes
+                    )
+                } else {
+                    // Many hosts reject change notifications; polling still
+                    // tracks edits, so keep the session alive.
+                    Debug.log("Automatic learning value notification unsupported: \(valueResult.rawValue)")
+                }
+            } else {
+                Debug.log("Automatic learning observer creation failed: \(result.rawValue)")
             }
-        }, &createdObserver)
-        guard result == .success, let createdObserver else {
-            Debug.log("Automatic learning observer creation failed: \(result.rawValue)")
-            cancel()
-            return
         }
 
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
-        let valueResult = AXObserverAddNotification(
-            createdObserver,
-            observation.element,
-            kAXValueChangedNotification as CFString,
-            refcon
-        )
-        guard valueResult == .success else {
-            Debug.log("Automatic learning value notification unsupported: \(valueResult.rawValue)")
-            cancel()
-            return
-        }
+        startPolling()
 
-        let appElement = AXUIElementCreateApplication(observation.processID)
-        _ = AXObserverAddNotification(
-            createdObserver,
-            appElement,
-            kAXFocusedUIElementChangedNotification as CFString,
-            refcon
-        )
-
-        observer = createdObserver
-        applicationElement = appElement
-        CFRunLoopAddSource(
-            CFRunLoopGetMain(),
-            AXObserverGetRunLoopSource(createdObserver),
-            .commonModes
-        )
-
-        let timeout = DispatchWorkItem { [weak self] in
-            self?.finishAndCancel()
-        }
-        timeoutWorkItem = timeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+        scheduleTimeout()
     }
 
     public func cancel() {
+        pollTimer?.cancel()
+        pollTimer = nil
         debounceWorkItem?.cancel()
         timeoutWorkItem?.cancel()
         debounceWorkItem = nil
@@ -413,7 +431,6 @@ public final class AutomaticCorrectionMonitor {
 
         guard notification == (kAXValueChangedNotification as String),
               let observation,
-              var tracker,
               let value = AccessibilityPasteTarget.stringAttribute(
                 kAXValueAttribute,
                 from: observation.element
@@ -421,6 +438,11 @@ public final class AutomaticCorrectionMonitor {
             return
         }
 
+        processValue(value)
+    }
+
+    private func processValue(_ value: String) {
+        guard var tracker else { return }
         let update = tracker.update(to: value)
         self.tracker = tracker
         switch update {
@@ -431,8 +453,42 @@ public final class AutomaticCorrectionMonitor {
             // ambiguous. Discard the session without learning anything.
             cancel()
         case .relevant:
+            scheduleTimeout()
             scheduleDetection()
         }
+    }
+
+    private func startPolling() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(
+            deadline: .now() + Self.pollInterval,
+            repeating: Self.pollInterval
+        )
+        timer.setEventHandler { [weak self] in
+            guard let self,
+                  let observation = self.observation,
+                  let value = AccessibilityPasteTarget.stringAttribute(
+                    kAXValueAttribute,
+                    from: observation.element
+                  ) else {
+                return
+            }
+            self.processValue(value)
+        }
+        timer.resume()
+        pollTimer = timer
+    }
+
+    private func scheduleTimeout() {
+        timeoutWorkItem?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.finishAndCancel()
+        }
+        timeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.sessionTimeout,
+            execute: timeout
+        )
     }
 
     private func scheduleDetection() {
