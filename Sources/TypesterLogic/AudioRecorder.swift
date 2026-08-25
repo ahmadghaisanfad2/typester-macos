@@ -2,12 +2,50 @@ import AVFoundation
 import Cocoa
 import CoreAudio
 
+/// Tracks one watchdogged CoreAudio attempt, shared between its worker queue
+/// and the main thread. The first of completion or abandonment wins; the
+/// losing path is dropped. Internal so tests can exercise the claim logic.
+final class EngineAttemptState {
+    private let lock = NSLock()
+    private var settled = false
+    private var abandoned = false
+
+    /// Claims the completion path; false once settled or abandoned.
+    func claimCompletion() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !settled, !abandoned else { return false }
+        settled = true
+        return true
+    }
+
+    /// Claims the timeout path; false once settled or already abandoned.
+    func claimAbandonment() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !settled, !abandoned else { return false }
+        settled = true
+        abandoned = true
+        return true
+    }
+
+    /// Workers poll this between risky steps so an abandoned attempt can
+    /// unwind and clean up after itself instead of leaving dangling state.
+    var wasAbandoned: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return abandoned
+    }
+}
+
 public class AudioRecorder {
     public init() {}
     private var audioEngine: AVAudioEngine?
+    /// Captured while the input tap is installed so teardown never has to call
+    /// the `inputNode` getter again — each call re-queries the HAL synchronously.
+    private var tappedInputNode: AVAudioInputNode?
     private var lifecycle = AudioRecordingLifecycle()
     private var hasInputTap = false
-    private var isPreparingEngine = false
     private var lastLevelEmit: CFAbsoluteTime = 0
     private var engineConfigObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
@@ -25,6 +63,71 @@ public class AudioRecorder {
     public var onError: ((String) -> Void)?
 
     private let spectrumAnalyzer = SpectrumAnalyzer()
+
+    /// Upper bound for one synchronous CoreAudio/HAL round trip. Misbehaving
+    /// audio devices can make these calls livelock; the watchdog abandons the
+    /// attempt instead of letting it freeze the app. Generous because cold
+    /// CoreAudio init legitimately takes multiple seconds on some machines.
+    private static let halAttemptTimeout: TimeInterval = 15
+
+    // MARK: - Engine-op chain
+    // Engine-touching work runs one watchdogged attempt at a time on private
+    // queues; all state decisions stay on the main thread. A wedged HAL call
+    // strands only its own worker thread — the chain moves on once the
+    // watchdog fires, so the app and future attempts stay responsive.
+
+    private var engineOpInFlight = false
+    private var pendingEngineOps: [() -> Void] = []
+
+    private func enqueueEngineOp(_ op: @escaping () -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        pendingEngineOps.append(op)
+        pumpEngineOps()
+    }
+
+    private func pumpEngineOps() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !engineOpInFlight, !pendingEngineOps.isEmpty else { return }
+        engineOpInFlight = true
+        let op = pendingEngineOps.removeFirst()
+        op()
+    }
+
+    private func finishEngineOp() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        engineOpInFlight = false
+        pumpEngineOps()
+    }
+
+    /// Runs `work` on a private queue and `completion` on the main queue,
+    /// unless `work` exceeds the watchdog timeout, in which case `onTimeout`
+    /// runs on the main queue and the attempt is abandoned — a late worker is
+    /// expected to check `state` and clean up after itself.
+    private func runHALAttempt<T>(
+        label: String,
+        timeout: TimeInterval = halAttemptTimeout,
+        work: @escaping (EngineAttemptState) -> T?,
+        completion: @escaping (T?) -> Void,
+        onTimeout: @escaping () -> Void
+    ) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let state = EngineAttemptState()
+        let queue = DispatchQueue(label: "com.typester.audio-hal.\(UUID().uuidString)", qos: .userInitiated)
+        queue.async { [weak self] in
+            let value = work(state)
+            DispatchQueue.main.async {
+                guard state.claimCompletion() else { return }
+                completion(value)
+                self?.finishEngineOp()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            guard state.claimAbandonment() else { return }
+            Debug.log("[watchdog] \(label) exceeded \(Int(timeout))s — CoreAudio HAL unresponsive; attempt abandoned")
+            onTimeout()
+            self?.finishEngineOp()
+        }
+    }
 
     // MARK: - Sleep/wake resilience
 
@@ -53,6 +156,7 @@ public class AudioRecorder {
     }
 
     private func handleSystemWake() {
+        dispatchPrecondition(condition: .onQueue(.main))
         Debug.log("System woke — recycling audio engine")
         recycleEngine()
         if lifecycle.state == .recording || lifecycle.state == .starting {
@@ -66,16 +170,11 @@ public class AudioRecorder {
 
     /// Stops and discards the cached engine. Safe to call from any state.
     private func recycleEngine() {
-        removeInputTap()
-        if let engine = audioEngine {
-            engine.stop()
-            engine.reset()
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard audioEngine != nil || hasInputTap else { return }
+        enqueueEngineOp { [weak self] in
+            self?.runTeardownAttempt(keepEngineWarm: false)
         }
-        if let engineConfigObserver {
-            NotificationCenter.default.removeObserver(engineConfigObserver)
-            self.engineConfigObserver = nil
-        }
-        audioEngine = nil
     }
 
     private func observeEngineConfiguration(_ engine: AVAudioEngine) {
@@ -122,22 +221,39 @@ public class AudioRecorder {
 
     // MARK: - Recording
 
-    /// Pre-create the audio engine so the first dictate press is not blocked by CoreAudio init.
-    /// Runs on the main thread shortly after launch — off-thread creation can bind a bad input format.
+    /// Pre-create the audio engine so the first dictate press is not blocked by
+    /// CoreAudio init. The HAL queries behind `engine.inputNode` are
+    /// synchronous mach RPCs that can livelock with a misbehaving audio
+    /// device, so they run watchdogged on a private queue — never on the main
+    /// thread, where a wedged query would freeze the whole app.
     public func prepareEngine() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self else { return }
-            guard self.audioEngine == nil, !self.isPreparingEngine else { return }
-            self.isPreparingEngine = true
-            let engine = AVAudioEngine()
-            _ = engine.inputNode.outputFormat(forBus: 0)
-            self.audioEngine = engine
-            self.observeEngineConfiguration(engine)
-            self.isPreparingEngine = false
+            self.enqueueEngineOp { self.runPrepareAttempt() }
         }
     }
 
+    private func runPrepareAttempt() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard audioEngine == nil else {
+            finishEngineOp()
+            return
+        }
+        runHALAttempt(label: "audio engine prewarm") { _ -> AVAudioEngine? in
+            let engine = AVAudioEngine()
+            _ = engine.inputNode.outputFormat(forBus: 0)
+            return engine
+        } completion: { [weak self] engine in
+            guard let self, let engine else { return }
+            guard self.audioEngine == nil else { return }
+            self.audioEngine = engine
+            self.observeEngineConfiguration(engine)
+            Debug.log("Audio engine prewarmed")
+        } onTimeout: {}
+    }
+
     public func startRecording() {
+        dispatchPrecondition(condition: .onQueue(.main))
         Debug.log("startRecording() called, state=\(lifecycle.state)")
         guard lifecycle.begin() else {
             Debug.log("startRecording() SKIPPED - recorder is already active")
@@ -158,68 +274,92 @@ public class AudioRecorder {
     }
 
     public func stopRecording() {
+        dispatchPrecondition(condition: .onQueue(.main))
         let wasActive = lifecycle.stop()
         Debug.log("stopRecording() called, wasActive=\(wasActive)")
-        removeInputTap()
         guard wasActive else { return }
 
         Debug.log("Stopping audio engine...")
-        audioEngine?.stop()
-        audioEngine?.reset()
         // Keep the engine warm — recreating AVAudioEngine is multi-second when Discord holds audio devices.
-        lastLevelEmit = 0
-        spectrumAnalyzer.reset()
-        DispatchQueue.main.async { [weak self] in
-            self?.onAudioLevel?(0)
-            self?.onSpectrum?(Array(repeating: 0, count: self?.spectrumAnalyzer.bandCount ?? 0))
+        enqueueEngineOp { [weak self] in
+            self?.runTeardownAttempt(keepEngineWarm: true)
         }
-        Debug.log("Audio engine stopped")
     }
 
-    // MARK: - Private
+    // MARK: - Start attempt
 
-    private func setInputDevice(_ deviceID: AudioDeviceID, for engine: AVAudioEngine) {
-        let inputNode = engine.inputNode
-        guard let audioUnit = inputNode.audioUnit else { return }
-
-        var deviceIDCopy = deviceID
-        AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &deviceIDCopy,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+    private enum StartOutcome {
+        case started(engine: AVAudioEngine, inputNode: AVAudioInputNode, engineIsNew: Bool)
+        case failed(String, dropEngine: Bool)
     }
 
     private func setupAndStart() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard lifecycle.isStarting else { return }
-        // A stale engine (created before sleep, or holding a dead device) is a
-        // crash source on start — always rebuild after a configuration change.
-        let audioEngine: AVAudioEngine
-        if let existing = self.audioEngine {
-            audioEngine = existing
-        } else {
-            audioEngine = AVAudioEngine()
-            self.audioEngine = audioEngine
-            observeEngineConfiguration(audioEngine)
+        // Capture settings on the main thread; the attempt runs off-main.
+        let selectedMicID = SettingsStore.shared.selectedMicrophoneID
+        let targetRate = targetSampleRate
+        enqueueEngineOp { [weak self] in
+            self?.runStartAttempt(selectedMicID: selectedMicID, targetRate: targetRate)
         }
+    }
 
-        // Set selected microphone if specified
-        if let micIDString = SettingsStore.shared.selectedMicrophoneID,
-           let micID = AudioDeviceID(micIDString) {
-            setInputDevice(micID, for: audioEngine)
-        }
-
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            failStart("The selected microphone has no usable audio format.")
+    private func runStartAttempt(selectedMicID: String?, targetRate: Double) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard lifecycle.isStarting else {
+            finishEngineOp()
             return
         }
+        let existingEngine = audioEngine
 
-        let sampleRate = targetSampleRate
+        runHALAttempt(label: "audio engine start") { [weak self] state -> StartOutcome? in
+            guard let self else { return nil }
+            return self.performEngineStart(
+                engine: existingEngine ?? AVAudioEngine(),
+                engineIsNew: existingEngine == nil,
+                selectedMicID: selectedMicID,
+                targetRate: targetRate,
+                state: state
+            )
+        } completion: { [weak self] outcome in
+            guard let self, let outcome else { return }
+            self.handleStartOutcome(outcome)
+        } onTimeout: { [weak self] in
+            guard let self else { return }
+            // The wedged worker may still hold the engine it was configuring;
+            // it unwinds itself if it ever returns. Drop main-side references
+            // so the next attempt builds a fresh engine.
+            self.audioEngine = nil
+            self.tappedInputNode = nil
+            self.hasInputTap = false
+            guard self.lifecycle.isStarting else { return }
+            self.lifecycle.failStarting()
+            self.onError?("The microphone is not responding. An audio device is blocking CoreAudio — try again, or quit and reopen Typester if this persists.")
+        }
+    }
+
+    /// Runs on a private attempt queue. Every HAL-touching step is followed by
+    /// an abandonment check so a timed-out attempt unwinds cleanly.
+    private func performEngineStart(
+        engine: AVAudioEngine,
+        engineIsNew: Bool,
+        selectedMicID: String?,
+        targetRate: Double,
+        state: EngineAttemptState
+    ) -> StartOutcome? {
+        if let micID = selectedMicID.flatMap(AudioDeviceID.init) {
+            Self.setDevice(micID, on: engine)
+        }
+
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        if state.wasAbandoned { return nil }
+
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            return .failed("The selected microphone has no usable audio format.", dropEngine: engineIsNew)
+        }
+
+        let sampleRate = targetRate
         // Target format: mono PCM Int16 at the provider's required rate
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -227,13 +367,11 @@ public class AudioRecorder {
             channels: 1,
             interleaved: true
         ) else {
-            onError?("Failed to create target audio format")
-            return
+            return .failed("Failed to create target audio format", dropEngine: engineIsNew)
         }
 
         guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            onError?("Failed to create audio converter")
-            return
+            return .failed("Failed to create audio converter", dropEngine: engineIsNew)
         }
 
         // Request ~60 Hz taps; CoreAudio may deliver larger buffers — always size convert from actual frames.
@@ -242,7 +380,8 @@ public class AudioRecorder {
         )
         let rateRatio = sampleRate / max(inputFormat.sampleRate, 1)
 
-        removeInputTap()
+        // Clear any tap left behind by an interrupted previous session.
+        inputNode.removeTap(onBus: 0)
         spectrumAnalyzer.reset()
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
@@ -277,35 +416,117 @@ public class AudioRecorder {
                 self.onAudioBuffer?(data)
             }
         }
-        hasInputTap = true
+        if state.wasAbandoned {
+            inputNode.removeTap(onBus: 0)
+            return nil
+        }
 
         do {
             Debug.log("Starting audio engine...")
-            try audioEngine.start()
-            lifecycle.finishStarting()
+            try engine.start()
             Debug.log("Audio engine started successfully")
         } catch {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
             // The failed engine is likely poisoned (stale device/format after
             // wake). Discard it so the next attempt builds a fresh one.
-            recycleEngine()
-            failStart("Failed to start audio engine: \(error.localizedDescription)")
+            return .failed("Failed to start audio engine: \(error.localizedDescription)", dropEngine: true)
+        }
+        if state.wasAbandoned {
+            // The watchdog gave up on us mid-start; shut back down quietly.
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engine.reset()
+            return nil
+        }
+
+        return .started(engine: engine, inputNode: inputNode, engineIsNew: engineIsNew)
+    }
+
+    private func handleStartOutcome(_ outcome: StartOutcome) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        switch outcome {
+        case .started(let engine, let inputNode, let engineIsNew):
+            audioEngine = engine
+            tappedInputNode = inputNode
+            hasInputTap = true
+            lastLevelEmit = 0
+            if engineIsNew {
+                observeEngineConfiguration(engine)
+            }
+            lifecycle.finishStarting()
+        case .failed(let message, let dropEngine):
+            hasInputTap = false
+            tappedInputNode = nil
+            lifecycle.failStarting()
+            onError?(message)
+            enqueueEngineOp { [weak self] in
+                self?.runTeardownAttempt(keepEngineWarm: !dropEngine)
+            }
         }
     }
 
-    private func removeInputTap() {
-        guard hasInputTap else { return }
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        hasInputTap = false
+    private static func setDevice(_ deviceID: AudioDeviceID, on engine: AVAudioEngine) {
+        guard let audioUnit = engine.inputNode.audioUnit else { return }
+
+        var deviceIDCopy = deviceID
+        AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceIDCopy,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
     }
 
-    private func failStart(_ message: String) {
-        removeInputTap()
-        audioEngine?.stop()
-        audioEngine?.reset()
-        lifecycle.failStarting()
-        onError?(message)
+    // MARK: - Teardown attempt
+
+    private func runTeardownAttempt(keepEngineWarm: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let engine = audioEngine
+        let inputNode = tappedInputNode
+        let hadTap = hasInputTap
+
+        runHALAttempt(label: "audio engine teardown") { _ -> AVAudioEngine? in
+            if hadTap, let inputNode {
+                inputNode.removeTap(onBus: 0)
+            }
+            engine?.stop()
+            engine?.reset()
+            return engine
+        } completion: { [weak self] tornDownEngine in
+            guard let self else { return }
+            self.finishTeardown(engine: tornDownEngine, keepEngineWarm: keepEngineWarm)
+        } onTimeout: { [weak self] in
+            guard let self else { return }
+            // Wedged teardown: drop references so the next session builds fresh.
+            self.hasInputTap = false
+            self.tappedInputNode = nil
+            if !keepEngineWarm { self.audioEngine = nil }
+        }
     }
+
+    private func finishTeardown(engine: AVAudioEngine?, keepEngineWarm: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        hasInputTap = false
+        tappedInputNode = nil
+        lastLevelEmit = 0
+        spectrumAnalyzer.reset()
+        if keepEngineWarm {
+            onAudioLevel?(0)
+            onSpectrum?(Array(repeating: 0, count: spectrumAnalyzer.bandCount))
+            Debug.log("Audio engine stopped")
+            return
+        }
+        if let engineConfigObserver, engine != nil {
+            NotificationCenter.default.removeObserver(engineConfigObserver)
+            self.engineConfigObserver = nil
+        }
+        audioEngine = nil
+        Debug.log("Audio engine recycled")
+    }
+
+    // MARK: - Analysis
 
     private func emitAnalysis(from buffer: AVAudioPCMBuffer) {
         guard onAudioLevel != nil || onSpectrum != nil else { return }

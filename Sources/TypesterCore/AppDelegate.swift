@@ -1575,7 +1575,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         audioRecorder.prepareEngine()
 
         audioRecorder.onAudioBuffer = { [weak self] data in
-            guard let self else { return }
+            guard let self, self.isRecording else { return }
             if !self.isRetranscribing {
                 self.sessionAudioPCM.append(data)
                 self.uncommittedAudioPCM.append(data)
