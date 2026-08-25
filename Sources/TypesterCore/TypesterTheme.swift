@@ -178,9 +178,9 @@ extension View {
 
 // MARK: - Focusless button style
 
-/// Label-only button style that draws no keyboard-focus ring. The stock
-/// `.plain` style outlines a button with an accent-colored rectangle whenever
-/// it becomes first responder (e.g. the first sidebar item the moment the
+/// Label-only button style that draws nothing of its own. The stock `.plain`
+/// style outlines a button with an accent-colored rectangle whenever it
+/// becomes first responder (e.g. the first sidebar item the moment the
 /// settings window opens), and the rectangle stays until focus moves — it
 /// reads like a selection that is stuck on screen.
 struct FocuslessButtonStyle: ButtonStyle {
@@ -191,6 +191,34 @@ struct FocuslessButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == FocuslessButtonStyle {
     static var plainFocusless: FocuslessButtonStyle { FocuslessButtonStyle() }
+}
+
+extension View {
+    /// Suppresses the system keyboard-focus ring (macOS 14+; no-op earlier).
+    ///
+    /// The ring is drawn by macOS around the focused control itself, so a
+    /// custom ButtonStyle cannot remove it. This design language already
+    /// shows its own focus state (FieldCard borders, the active sidebar pill),
+    /// so the system ring only ever reads as a second, stuck selection.
+    @ViewBuilder
+    func focusRingSuppressed() -> some View {
+        if #available(macOS 14.0, *) {
+            focusEffectDisabled()
+        } else {
+            self
+        }
+    }
+
+    /// `.plainFocusless` plus full ring suppression: the button also leaves
+    /// the key-focus loop so it can neither grab focus when the window opens
+    /// (with "Keyboard navigation" enabled in System Settings) nor show a
+    /// ring when tabbed to. For custom-styled buttons that show their own
+    /// pressed/active state.
+    func focuslessButton() -> some View {
+        buttonStyle(.plainFocusless)
+            .focusable(false)
+            .focusRingSuppressed()
+    }
 }
 
 // MARK: - Segmented control
@@ -222,7 +250,7 @@ struct CodexSegmented<Option: Hashable>: View {
                             HairlineBorder(cornerRadius: 6, color: isActive ? Codex.hairline : Color.clear)
                         )
                 }
-                .buttonStyle(.plainFocusless)
+                .focuslessButton()
                 .contentShape(Rectangle())
             }
         }

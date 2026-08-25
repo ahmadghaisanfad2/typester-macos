@@ -65,6 +65,7 @@ struct SettingsView: View {
         }
         .background(Codex.background)
         .tint(Codex.green)
+        .focusRingSuppressed()
         .frame(minWidth: 700, minHeight: 520)
         .sheet(isPresented: $showingAddTerm) {
             AddTermView { term in
@@ -176,7 +177,7 @@ struct SettingsView: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plainFocusless)
+        .focuslessButton()
         .padding(.horizontal, 8)
     }
 
@@ -694,7 +695,7 @@ struct SettingsView: View {
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plainFocusless)
+        .focuslessButton()
         .help("Remove")
     }
 
@@ -955,7 +956,7 @@ struct SettingsView: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plainFocusless)
+                .focuslessButton()
                 .help(showKey.wrappedValue ? "Hide key" : "Show key")
 
                 if savedKey != nil && key.wrappedValue == savedKey {
@@ -1158,7 +1159,7 @@ struct ShortcutRecorderView: View {
                 .frame(width: 168, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plainFocusless)
+            .focuslessButton()
             .fieldCard(focused: isRecording)
             .background(
                 ShortcutRecorderHelper(
@@ -1179,7 +1180,7 @@ struct ShortcutRecorderView: View {
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plainFocusless)
+                .focuslessButton()
                 .help("Reset to triple ⌘")
             }
         }

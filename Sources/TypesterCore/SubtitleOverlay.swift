@@ -366,7 +366,7 @@ struct SubtitleView: View {
                 .background(Color.white.opacity(0.10), in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         }
-        .buttonStyle(.plainFocusless)
+        .focuslessButton()
         .contentShape(Capsule())
         .opacity(viewModel.isHovering ? 1 : 0)
         .scaleEffect(viewModel.isHovering ? 1 : 0.985)
