@@ -43,8 +43,16 @@ public class TextPaster {
     // MARK: - Paste
 
     /// Pastes text into the focused field. Returns false if accessibility is missing or text is empty.
+    ///
+    /// When `keepsClipboardText` is true the transcript is left on the clipboard
+    /// (instead of restoring the previous clipboard contents) so it can be
+    /// re-pasted manually with ⌘V elsewhere.
     @discardableResult
-    public func paste(_ text: String, observeCorrections: Bool = false) -> Bool {
+    public func paste(
+        _ text: String,
+        observeCorrections: Bool = false,
+        keepsClipboardText: Bool = false
+    ) -> Bool {
         guard !text.isEmpty else { return false }
 
         guard TextPaster.checkAccessibilityPermission() else {
@@ -68,15 +76,21 @@ public class TextPaster {
             }
         }
 
+        let pasteboard = NSPasteboard.general
+
         // Electron/Cursor often reports AX success without inserting — skip AX there.
         if !prefersCommandVPaste(), insertTextViaAccessibility(text) {
             if let observation = pasteTarget?.makeObservation(insertedText: text) {
                 onPasteObserved?(observation)
             }
+            // AX insertion never touches the pasteboard; leave the transcript
+            // there explicitly when the user opted into clipboard keeping.
+            if keepsClipboardText {
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+            }
             return true
         }
-
-        let pasteboard = NSPasteboard.general
         let previousItems = pasteboard.pasteboardItems?.compactMap { item -> [NSPasteboard.PasteboardType: Data]? in
             var dict: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
@@ -100,8 +114,10 @@ public class TextPaster {
             }
 
             // Electron (Cursor) needs a longer window than native AppKit fields.
+            // With clipboard keeping enabled the transcript must survive here,
+            // so skip restoring what was on the pasteboard before the paste.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                guard let previousItems, !previousItems.isEmpty else { return }
+                guard let previousItems, !previousItems.isEmpty, !keepsClipboardText else { return }
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 for itemDict in previousItems {

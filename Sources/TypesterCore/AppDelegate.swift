@@ -1252,7 +1252,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let pasteText = entry.text.hasSuffix(" ") ? entry.text : entry.text + " "
         textPaster.paste(
             pasteText,
-            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled
+            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled,
+            keepsClipboardText: SettingsStore.shared.copyTranscriptToClipboard
         )
     }
 
@@ -1392,7 +1393,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
         textPaster.paste(
             pasteText,
-            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled
+            observeCorrections: SettingsStore.shared.automaticDictionaryLearningEnabled,
+            keepsClipboardText: SettingsStore.shared.copyTranscriptToClipboard
         )
 
         if let id = retranscribeEntryID,

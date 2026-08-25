@@ -27,6 +27,7 @@ Features:
 - **Domain / topic context** — Optional context fields in Settings for better domain bias
 - **Check for Updates** — Compare against your fork’s GitHub Releases and download the latest DMG
 - **Auto-paste** — Transcribed text is automatically pasted into the active application
+- **Clipboard keeping** — Optional: keep each transcript on your clipboard so you can ⌘V it again when no text field was focused
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
 - **Launch at login** — Start automatically when you log in
 
