@@ -156,6 +156,15 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// When true, leave the final transcript on the clipboard after pasting so it
+    /// can be re-pasted manually with ⌘V into a different field. When false
+    /// (default), the previous clipboard contents are restored after every paste.
+    @Published public var copyTranscriptToClipboard: Bool = false {
+        didSet {
+            UserDefaults.standard.set(copyTranscriptToClipboard, forKey: copyTranscriptToClipboardKey)
+        }
+    }
+
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
@@ -175,6 +184,7 @@ public class SettingsStore: ObservableObject {
     private let playDictationSoundsKey = "playDictationSounds"
     private let dictationSoundVolumeKey = "dictationSoundVolume"
     private let pasteOnPauseKey = "pasteOnPause"
+    private let copyTranscriptToClipboardKey = "copyTranscriptToClipboard"
     private let showInDockKey = "showInDock"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
@@ -426,6 +436,9 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: pasteOnPauseKey) != nil {
             pasteOnPause = UserDefaults.standard.bool(forKey: pasteOnPauseKey)
+        }
+        if UserDefaults.standard.object(forKey: copyTranscriptToClipboardKey) != nil {
+            copyTranscriptToClipboard = UserDefaults.standard.bool(forKey: copyTranscriptToClipboardKey)
         }
         if UserDefaults.standard.object(forKey: showInDockKey) != nil {
             showInDock = UserDefaults.standard.bool(forKey: showInDockKey)

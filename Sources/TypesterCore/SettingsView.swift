@@ -436,7 +436,7 @@ struct SettingsView: View {
                 SettingsRow(
                     "Paste on pause",
                     help: "Paste each utterance as soon as you pause.",
-                    showsDivider: false
+                    showsDivider: true
                 ) {
                     Toggle("", isOn: $settings.pasteOnPause)
                         .labelsHidden()
@@ -444,6 +444,17 @@ struct SettingsView: View {
                         .tint(Codex.green)
                         .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
                         .opacity(settings.sttProvider == .soniox && settings.sonioxMode == .async ? 0.45 : 1)
+                }
+
+                SettingsRow(
+                    "Copy transcript to clipboard",
+                    help: "Keep each transcript on your clipboard so you can press ⌘V to paste it again — handy when no text field was focused.",
+                    showsDivider: false
+                ) {
+                    Toggle("", isOn: $settings.copyTranscriptToClipboard)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
                 }
             }
         }
