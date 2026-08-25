@@ -32,24 +32,95 @@ struct DraggableAppIconTile: View {
         .frame(width: 46, height: 46)
         .overlay(HairlineBorder(cornerRadius: 10, color: Color(hex: 0x33363D)))
         .opacity(appBundleURL == nil ? 0.5 : 1)
-        .modifier(AppBundleFileDrag(url: appBundleURL))
-        .help(appBundleURL == nil
-              ? "Install Typester.app to drag it into Accessibility"
-              : "Drag me into the Accessibility list")
+        .overlay {
+            if let appBundleURL {
+                AppBundleDragSource(bundleURL: appBundleURL)
+            } else {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .help("Install Typester.app to drag it into Accessibility")
+            }
+        }
     }
 }
 
-/// Supplies a file-URL item provider, which System Settings accepts as an app to add.
-private struct AppBundleFileDrag: ViewModifier {
-    let url: URL?
+/// AppKit drag source overlaid on the tile.
+///
+/// SwiftUI's `.onDrag` can only vend `NSItemProvider` data, and the previous
+/// implementation (`NSItemProvider(contentsOf:)`) asked macOS to copy the
+/// whole `.app` bundle into a temporary directory before the drop target
+/// could read it — so the Accessibility entry appeared late or never, and
+/// TCC could end up pointing at the temp copy instead of the installed app.
+///
+/// An AppKit dragging session instead hands over the real bundle URL
+/// instantly, carrying the same pasteboard types a Finder drag does
+/// (`public.file-url` plus the legacy `NSFilenamesPboardType`), which the
+/// System Settings permission lists accept in place.
+private final class AppBundleDragSourceView: NSView, NSPasteboardItemDataProvider, NSDraggingSource {
+    private static let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
 
-    func body(content: Content) -> some View {
-        if let url {
-            content.onDrag {
-                NSItemProvider(contentsOf: url) ?? NSItemProvider(object: url as NSURL)
-            }
-        } else {
-            content
+    private let bundleURL: URL
+
+    init(bundleURL: URL) {
+        self.bundleURL = bundleURL
+        super.init(frame: .zero)
+        toolTip = "Drag me into the Accessibility list"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let item = NSPasteboardItem()
+        item.setDataProvider(self, forTypes: [.fileURL, Self.filenamesType])
+
+        let dragItem = NSDraggingItem(pasteboardWriter: item)
+        dragItem.setDraggingFrame(bounds, contents: dragImage)
+
+        let session = beginDraggingSession(with: [dragItem], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    func pasteboard(
+        _ pasteboard: NSPasteboard?,
+        item: NSPasteboardItem,
+        provideDataForType type: NSPasteboard.PasteboardType
+    ) {
+        switch type {
+        case .fileURL:
+            item.setData(bundleURL.dataRepresentation, forType: type)
+        case Self.filenamesType:
+            item.setPropertyList([bundleURL.path], forType: type)
+        default:
+            break
         }
     }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        .copy
+    }
+
+    private var dragImage: NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: bundleURL.path)
+        icon.size = NSSize(width: 46, height: 46)
+        return icon
+    }
+}
+
+private struct AppBundleDragSource: NSViewRepresentable {
+    let bundleURL: URL
+
+    func makeNSView(context: Context) -> AppBundleDragSourceView {
+        AppBundleDragSourceView(bundleURL: bundleURL)
+    }
+
+    func updateNSView(_ nsView: AppBundleDragSourceView, context: Context) {}
 }
