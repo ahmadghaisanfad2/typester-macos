@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish (e.g. v1.19.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync build-release VERSION
+        run: |
+          sed -i.bak "s/^VERSION=.*/VERSION=\"${{ steps.version.outputs.version }}\"/" scripts/build-release.sh
+          rm -f scripts/build-release.sh.bak
+
+      - name: Build DMG
+        run: ./scripts/build-release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG="dist/Typester-${VERSION}.dmg"
+          test -f "$DMG"
+
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<EOF
+          ## Typester ${VERSION}
+
+          ### What's new
+          - **OpenRouter STT provider** — dictate through OpenRouter with your own API key
+          - **Live transcription model catalog** — models load from OpenRouter and refresh automatically
+          - Batch transcription after you stop (same UX as Soniox Async)
+
+          ### Install
+          1. Download \`Typester-${VERSION}.dmg\`
+          2. Open the DMG and drag Typester to Applications
+          3. If Gatekeeper blocks an unsigned build: Right-click → Open
+
+          ### Updating
+          Already running Typester 1.15.0 or newer? Update from the app itself — menu bar
+          icon → Check for Updates… (or Settings → Check for Updates).
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" --clobber
+          else
+            gh release create "$TAG" "$DMG" \
+              --title "Typester ${VERSION}" \
+              --notes-file "$NOTES"
+          fi
+          rm -f "$NOTES"
+          gh release view "$TAG" --json url,assets
