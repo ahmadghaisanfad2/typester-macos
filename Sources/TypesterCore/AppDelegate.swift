@@ -128,16 +128,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             object: nil
         )
 
-        // Show onboarding if selected provider has no API key. Reading the
-        // existing key may trigger macOS's one-time Keychain prompt after the
-        // stable-signing migration; the follow-up notice explains that prompt.
+        // Show onboarding when the provider has no API key, OR when mic /
+        // Accessibility are still missing (reinstall keeps the key in Keychain
+        // but TCC grants do not always survive). Users finish both permissions
+        // in the front — not after a dead hotkey. Reading the existing key may
+        // trigger macOS's one-time Keychain prompt after the stable-signing
+        // migration; the follow-up notice explains that prompt.
         // QA-only environment hooks bypass that read so the migration notice
         // and paste-learning path can be verified without modifying Keychain.
         let environment = ProcessInfo.processInfo.environment
         let isQALaunch = environment["TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE"] == "1"
             || environment["TYPESTER_QA_PASTE"] != nil
         let hasConfiguredAPIKey = isQALaunch || hasAPIKeyForCurrentProvider()
+        let microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        let accessibilityGranted = TextPaster.checkAccessibilityPermission()
+        let needsPermissionSetup = PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: hasConfiguredAPIKey,
+            microphoneGranted: microphoneGranted,
+            accessibilityGranted: accessibilityGranted
+        )
+        // Lost grant after an update → recovery panel (one click). Never
+        // granted / incomplete first run → onboarding, which is clearer.
+        let lostPreviouslyGrantedAccessibility =
+            accessibilityGranted == false
+            && PermissionRecovery.lastKnownAccessibilityTrusted()
+
         if !hasConfiguredAPIKey {
+            showOnboarding()
+        } else if needsPermissionSetup && !lostPreviouslyGrantedAccessibility {
             showOnboarding()
         } else {
             updateMonitoringMode()
@@ -2069,10 +2087,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showOnboarding() {
         if onboardingWindow == nil {
-            let onboardingView = OnboardingView {
+            let hasAPIKey = hasAPIKeyForCurrentProvider()
+            let microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+            let accessibilityGranted = TextPaster.checkAccessibilityPermission()
+            let startStep = PermissionSetup.startStep(
+                hasAPIKey: hasAPIKey,
+                microphoneGranted: microphoneGranted,
+                accessibilityGranted: accessibilityGranted
+            )
+            let onboardingView = OnboardingView(initialStep: startStep.rawValue) {
                 self.onboardingWindow?.close()
                 self.onboardingWindow = nil
+                // Re-arm hotkey / press-to-speak / Esc without requiring a relaunch.
+                self.setupEscapeInterceptor()
                 self.updateMonitoringMode()
+                if TextPaster.checkAccessibilityPermission() {
+                    PermissionRecovery.markAccessibilityTrusted(true)
+                }
             }
             let hostingController = NSHostingController(rootView: onboardingView)
             let window = NSWindow(contentViewController: hostingController)

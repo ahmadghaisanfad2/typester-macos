@@ -197,4 +197,49 @@ do {
     )
 }
 
+// Permission setup: front-load onboarding until mic + accessibility are granted.
+do {
+    expect(
+        PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: false,
+            microphoneGranted: false,
+            accessibilityGranted: false
+        ),
+        "fresh install shows onboarding"
+    )
+    expect(
+        PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: false
+        ),
+        "API key alone still shows onboarding for accessibility"
+    )
+    expect(
+        !PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: true
+        ),
+        "fully configured skips onboarding"
+    )
+    expect(
+        PermissionSetup.startStep(
+            hasAPIKey: true,
+            microphoneGranted: false,
+            accessibilityGranted: false
+        ) == .microphone,
+        "resume at microphone when mic missing"
+    )
+    expect(
+        PermissionSetup.startStep(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: false
+        ) == .accessibility,
+        "resume at accessibility when only AX missing"
+    )
+}
+
 print("All smoke checks passed.")
+

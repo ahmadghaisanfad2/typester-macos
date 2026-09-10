@@ -10,13 +10,20 @@ struct OnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var micPromptShown = false
+    @State private var accessibilityPromptShown = false
     @FocusState private var isApiKeyFocused: Bool
 
+    private let initialStep: Int
     var onComplete: () -> Void
+
+    init(initialStep: Int = 1, onComplete: @escaping () -> Void) {
+        self.initialStep = min(max(initialStep, 1), 3)
+        self.onComplete = onComplete
+    }
 
     private var canContinue: Bool {
         switch currentStep {
-        case 1: return !apiKeyInput.isEmpty
+        case 1: return hasApiKey || !apiKeyInput.isEmpty
         case 2: return micGranted
         case 3: return accessibilityGranted
         default: return true
@@ -118,9 +125,13 @@ struct OnboardingView: View {
         .onAppear {
             checkPermissions()
             loadApiKeyForProvider()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isApiKeyFocused = true
+            currentStep = initialStep
+            if initialStep == 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isApiKeyFocused = true
+                }
             }
+            triggerPermissionsForCurrentStepIfNeeded()
         }
         .onChange(of: settings.sttProvider) { provider in
             loadApiKeyForProvider()
@@ -129,18 +140,13 @@ struct OnboardingView: View {
             }
         }
         .onChange(of: currentStep) { step in
-            // Auto-trigger the mic permission prompt when the user reaches
-            // step 2, once per onboarding session (no nagging if denied).
-            if step == 2 && !micPromptShown && micGranted == false {
-                micPromptShown = true
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    DispatchQueue.main.async {
-                        micGranted = granted
-                        if granted {
-                            withAnimation { currentStep = 3 }
-                        }
-                    }
-                }
+            triggerPermissionsForCurrentStepIfNeeded()
+            _ = step
+        }
+        .onChange(of: accessibilityGranted) { granted in
+            // Trust can flip while System Settings is frontmost; keep step state warm.
+            if granted, currentStep < 3 {
+                withAnimation { currentStep = 3 }
             }
         }
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
@@ -148,6 +154,48 @@ struct OnboardingView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             checkPermissions()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .accessibilityTrustChanged)) { note in
+            if let trusted = note.object as? Bool {
+                accessibilityGranted = trusted
+            } else {
+                accessibilityGranted = TextPaster.checkAccessibilityPermission()
+            }
+        }
+    }
+
+    /// Auto-open the system prompts so users finish permissions in this window.
+    private func triggerPermissionsForCurrentStepIfNeeded() {
+        if currentStep == 2 && !micPromptShown && !micGranted {
+            micPromptShown = true
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async {
+                    micGranted = granted
+                    if granted && currentStep == 2 {
+                        withAnimation { currentStep = 3 }
+                        triggerPermissionsForCurrentStepIfNeeded()
+                    }
+                }
+            }
+            return
+        }
+
+        if currentStep == 2 && micGranted {
+            withAnimation { currentStep = 3 }
+            DispatchQueue.main.async {
+                triggerPermissionsForCurrentStepIfNeeded()
+            }
+            return
+        }
+
+        if currentStep == 3 && !accessibilityPromptShown && !accessibilityGranted {
+            accessibilityPromptShown = true
+            // System prompt + the exact Privacy pane. User only drags the icon
+            // and toggles — no hunting through Settings from a dead hotkey.
+            TextPaster.requestAccessibilityPermission()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                TextPaster.openAccessibilitySettings()
+            }
         }
     }
 
@@ -300,7 +348,7 @@ struct OnboardingView: View {
                 HStack(spacing: 6) {
                     Text("Hold")
                     KeyToken(text: "fn")
-                    Text("and speak — your words appear wherever your cursor is. Release to paste.")
+                    Text("and speak — your words appear wherever your cursor is. Release to paste. Accessibility stays granted for later updates.")
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(Codex.textSecondary)
@@ -327,7 +375,7 @@ struct OnboardingView: View {
                 .controlSize(.large)
             } else if canContinue && currentStep < 3 {
                 Button("Continue") {
-                    if currentStep == 1 && !apiKeyInput.isEmpty {
+                    if currentStep == 1, !hasApiKey, !apiKeyInput.isEmpty {
                         switch settings.sttProvider {
                         case .soniox:
                             settings.apiKey = apiKeyInput
@@ -340,6 +388,9 @@ struct OnboardingView: View {
                         }
                     }
                     withAnimation { currentStep += 1 }
+                    DispatchQueue.main.async {
+                        triggerPermissionsForCurrentStepIfNeeded()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -426,22 +477,58 @@ struct OnboardingView: View {
             HStack(spacing: 14) {
                 DraggableAppIconTile()
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("1. Allow Typester in Accessibility")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Codex.text)
+
+                    Text(runsFromAppBundle
+                         ? "2. Drag the Typester icon into the list (no plus button)."
+                         : "Install Typester.app, then drag it into the Accessibility list.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Codex.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("3. Come back here — we detect the grant automatically.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Codex.textTertiary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(Codex.charcoal, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(HairlineBorder(cornerRadius: 10, color: Color(hex: 0x33363D)))
+
+            HStack(spacing: 8) {
                 Button("Open System Settings") {
+                    TextPaster.requestAccessibilityPermission()
                     TextPaster.openAccessibilitySettings()
                 }
-
-                Button("Relaunch") {
-                    TextPaster.relaunchApp()
-                }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                Button("I've granted access") {
+                    accessibilityGranted = TextPaster.checkAccessibilityPermission()
+                    AccessibilityTrustMonitor.shared.poll()
+                }
+                .controlSize(.regular)
+                .disabled(accessibilityGranted)
+
+                Spacer(minLength: 0)
             }
 
-            Text(runsFromAppBundle
-                 ? "Drag the Typester icon into the list in System Settings. That's it — no plus button, no file picker. Later updates keep this grant."
-                 : "Enable Typester in the list. If it was already on after an update, remove it, add /Applications/Typester.app again, enable it, then Relaunch.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Codex.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if accessibilityGranted {
+                Text("Access is granted. Continue below — the hotkey works without another trip to Settings.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Codex.green)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("macOS only allows this grant in System Settings. Typester opens the right pane for you and watches until you finish.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Codex.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
