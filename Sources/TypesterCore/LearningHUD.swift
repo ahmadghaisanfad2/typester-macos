@@ -12,6 +12,7 @@ final class LearningHUD {
     private var hideWorkItem: DispatchWorkItem?
     private let visibleDuration: TimeInterval = 2.2
     private let dismissalDuration: TimeInterval = 0.28
+    private let spaceObserver = SpaceFollowingWindow.SpaceObserver()
 
     private init() {}
 
@@ -47,8 +48,7 @@ final class LearningHUD {
                 window.isOpaque = false
                 window.backgroundColor = .clear
                 window.hasShadow = false
-                window.level = .floating
-                window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+                SpaceFollowingWindow.configure(window)
                 window.ignoresMouseEvents = true
                 window.contentView = hosting
                 self.window = window
@@ -67,7 +67,8 @@ final class LearningHUD {
             )
             window.setFrame(frame, display: true)
             window.alphaValue = 0
-            window.orderFrontRegardless()
+            SpaceFollowingWindow.reaffirm(window)
+            self.beginSpaceFollowing()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
                 window.animator().alphaValue = 1
@@ -81,12 +82,25 @@ final class LearningHUD {
         }
     }
 
+    private func beginSpaceFollowing() {
+        spaceObserver.start(
+            shouldReassert: { [weak self] in
+                self?.window?.isVisible == true
+            },
+            handler: { [weak self] in
+                guard let self, let window = self.window else { return }
+                SpaceFollowingWindow.reaffirm(window)
+            }
+        )
+    }
+
     private func dismiss() {
         guard let window else { return }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = dismissalDuration
             window.animator().alphaValue = 0
         }, completionHandler: {
+            self.spaceObserver.stop()
             window.orderOut(nil)
         })
     }
