@@ -46,7 +46,9 @@ public class PressKeyMonitor {
         eventMask |= (1 << CGEventType.keyDown.rawValue)
 
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
+            // HID tap sees flagsChanged more reliably while a text field has focus
+            // than a session tap (secure input / session-level filtering).
+            tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
             eventsOfInterest: eventMask,
@@ -104,6 +106,12 @@ public class PressKeyMonitor {
 
         // If another key is pressed while our key is held, it's being used as a modifier
         if type == .keyDown && isKeyDown && needsKeyDownMonitoring {
+            let downKeyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            // Focused text fields can emit keyDown for the modifier itself
+            // (e.g. Command while holding Command). That is not a chord.
+            guard KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: downKeyCode) else {
+                return Unmanaged.passUnretained(event)
+            }
             Debug.log("Key pressed while modifier held — treating as modifier combo, cancelling activation")
             usedAsModifier = true
             activationTimer?.cancel()

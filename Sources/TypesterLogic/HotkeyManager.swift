@@ -113,18 +113,23 @@ public class HotkeyManager {
 
         // keyDown monitors only invalidate pending single-tap chords.
         // Escape cancel is handled by EscapeInterceptor (consuming CGEvent tap).
-        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
-            self?.noteKeyDownWhilePending()
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.noteKeyDownWhilePending(keyCode: event.keyCode)
         }
 
         localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.noteKeyDownWhilePending()
+            self?.noteKeyDownWhilePending(keyCode: event.keyCode)
             return event
         }
     }
 
-    private func noteKeyDownWhilePending() {
+    private func noteKeyDownWhilePending(keyCode: UInt16) {
         guard pendingSingleTapIdentity != nil else { return }
+        // Focused text fields often deliver keyDown for the modifier itself.
+        // Only a real character key means ⌘+letter (or similar) — cancel then.
+        guard KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(keyCode)) else {
+            return
+        }
         pendingSingleTapUsedAsModifier = true
     }
 

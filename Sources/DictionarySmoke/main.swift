@@ -241,5 +241,22 @@ do {
     )
 }
 
+// Modifier keyDown in a focused text field must not cancel hotkey activation.
+do {
+    expect(
+        !KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_Command)),
+        "Command keyDown does not cancel pending tap"
+    )
+    expect(
+        !KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_Function)),
+        "Fn keyDown does not cancel pending tap"
+    )
+    expect(
+        KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_ANSI_C)),
+        "C keyDown cancels pending tap (real chord)"
+    )
+}
+
 print("All smoke checks passed.")
+
 
