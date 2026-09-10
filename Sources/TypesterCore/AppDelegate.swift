@@ -31,6 +31,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return DeepgramClient()
         case .openai:
             return OpenAIClient()
+        case .openrouter:
+            return OpenRouterClient()
         }
     }
 
@@ -304,6 +306,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return SettingsStore.shared.deepgramApiKey != nil
         case .openai:
             return SettingsStore.shared.openaiApiKey != nil
+        case .openrouter:
+            return SettingsStore.shared.openrouterApiKey != nil
         }
     }
 
@@ -403,6 +407,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if sttProvider is DeepgramClient { return }
         case .openai:
             if sttProvider is OpenAIClient { return }
+        case .openrouter:
+            if sttProvider is OpenRouterClient { return }
         }
 
         // Disconnect old provider
@@ -937,8 +943,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         micMenuItem.submenu = micMenu
         menu.addItem(micMenuItem)
 
-        // Languages submenu (Soniox hints / OpenAI languages; Deepgram auto-detects)
-        if SettingsStore.shared.sttProvider == .soniox || SettingsStore.shared.sttProvider == .openai {
+        // Languages submenu (Soniox / OpenAI / OpenRouter; Deepgram auto-detects)
+        if SettingsStore.shared.sttProvider == .soniox
+            || SettingsStore.shared.sttProvider == .openai
+            || SettingsStore.shared.sttProvider == .openrouter {
             let langMenu = NSMenu()
             let selectedLangs = Set(SettingsStore.shared.languageHints)
 

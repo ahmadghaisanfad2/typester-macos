@@ -167,12 +167,14 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.soniox.rawValue, "soniox")
         XCTAssertEqual(STTProviderType.deepgram.rawValue, "deepgram")
         XCTAssertEqual(STTProviderType.openai.rawValue, "openai")
+        XCTAssertEqual(STTProviderType.openrouter.rawValue, "openrouter")
     }
 
     func testSTTProviderTypeDisplayName() {
         XCTAssertEqual(STTProviderType.soniox.displayName, "Soniox")
         XCTAssertEqual(STTProviderType.deepgram.displayName, "Deepgram")
         XCTAssertEqual(STTProviderType.openai.displayName, "OpenAI")
+        XCTAssertEqual(STTProviderType.openrouter.displayName, "OpenRouter")
     }
 
     func testSTTProviderTypeModelID() {
@@ -181,12 +183,14 @@ final class ModelsTests: XCTestCase {
         SettingsStore.shared.sonioxMode = .realtime
         XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
+        XCTAssertEqual(STTProviderType.openrouter.modelID, SettingsStore.shared.openrouterModelID)
     }
 
     func testSTTProviderTypeAudioSampleRate() {
         XCTAssertEqual(STTProviderType.soniox.audioSampleRate, 16_000)
         XCTAssertEqual(STTProviderType.deepgram.audioSampleRate, 16_000)
         XCTAssertEqual(STTProviderType.openai.audioSampleRate, 24_000)
+        XCTAssertEqual(STTProviderType.openrouter.audioSampleRate, 16_000)
     }
 
     func testSTTProviderTypeCodable() throws {
@@ -200,10 +204,24 @@ final class ModelsTests: XCTestCase {
 
     func testSTTProviderTypeAllCases() {
         let allCases = STTProviderType.allCases
-        XCTAssertEqual(allCases.count, 3)
+        XCTAssertEqual(allCases.count, 4)
         XCTAssertTrue(allCases.contains(.soniox))
         XCTAssertTrue(allCases.contains(.deepgram))
         XCTAssertTrue(allCases.contains(.openai))
+        XCTAssertTrue(allCases.contains(.openrouter))
+    }
+
+    func testSTTProviderTypeIsBatchTranscription() {
+        let previousMode = SettingsStore.shared.sonioxMode
+        defer { SettingsStore.shared.sonioxMode = previousMode }
+
+        SettingsStore.shared.sonioxMode = .realtime
+        XCTAssertFalse(STTProviderType.soniox.isBatchTranscription)
+        SettingsStore.shared.sonioxMode = .async
+        XCTAssertTrue(STTProviderType.soniox.isBatchTranscription)
+        XCTAssertFalse(STTProviderType.deepgram.isBatchTranscription)
+        XCTAssertFalse(STTProviderType.openai.isBatchTranscription)
+        XCTAssertTrue(STTProviderType.openrouter.isBatchTranscription)
     }
 
     // MARK: - OpenAITranscribeModel tests

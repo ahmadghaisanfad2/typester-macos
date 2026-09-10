@@ -114,6 +114,19 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Selected OpenRouter transcription model slug (e.g. `openai/whisper-large-v3`).
+    @Published public var openrouterModelID: String = OpenRouterAPI.defaultModelID {
+        didSet {
+            let trimmed = openrouterModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed != openrouterModelID {
+                openrouterModelID = trimmed.isEmpty ? OpenRouterAPI.defaultModelID : trimmed
+                return
+            }
+            UserDefaults.standard.set(openrouterModelID, forKey: openrouterModelIDKey)
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     @Published public var showStreamPreview: Bool = true {
         didSet {
             UserDefaults.standard.set(showStreamPreview, forKey: showStreamPreviewKey)
@@ -169,6 +182,7 @@ public class SettingsStore: ObservableObject {
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
     private let sonioxModeKey = "sonioxMode"
+    private let openrouterModelIDKey = "openrouterModelID"
     private let activationModeKey = "activationMode"
     private let pressToSpeakKeyKey = "pressToSpeakKey"
     private let languageHintsKey = "languageHints"
@@ -190,6 +204,7 @@ public class SettingsStore: ObservableObject {
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
     private let openaiKeychainAccount = "openai-api-key"
+    private let openrouterKeychainAccount = "openrouter-api-key"
 
     private init() {
         loadShortcutKeys()
@@ -206,6 +221,7 @@ public class SettingsStore: ObservableObject {
         loadSTTProvider()
         loadOpenAIModel()
         loadSonioxMode()
+        loadOpenRouterModelID()
         loadFeedbackPreferences()
         syncLaunchAtLoginStatus()
     }
@@ -421,6 +437,15 @@ public class SettingsStore: ObservableObject {
         sonioxMode = mode
     }
 
+    private func loadOpenRouterModelID() {
+        guard let rawValue = UserDefaults.standard.string(forKey: openrouterModelIDKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else {
+            return
+        }
+        openrouterModelID = rawValue
+    }
+
     private func loadFeedbackPreferences() {
         if UserDefaults.standard.object(forKey: showStreamPreviewKey) != nil {
             showStreamPreview = UserDefaults.standard.bool(forKey: showStreamPreviewKey)
@@ -481,6 +506,19 @@ public class SettingsStore: ObservableObject {
                 setKeychainItem(value, account: openaiKeychainAccount)
             } else {
                 deleteKeychainItem(account: openaiKeychainAccount)
+            }
+            objectWillChange.send()
+        }
+    }
+
+    // OpenRouter API key
+    public var openrouterApiKey: String? {
+        get { getKeychainItem(account: openrouterKeychainAccount) }
+        set {
+            if let value = newValue {
+                setKeychainItem(value, account: openrouterKeychainAccount)
+            } else {
+                deleteKeychainItem(account: openrouterKeychainAccount)
             }
             objectWillChange.send()
         }
