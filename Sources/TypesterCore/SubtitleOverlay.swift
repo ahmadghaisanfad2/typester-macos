@@ -450,6 +450,7 @@ class SubtitleOverlay {
     private var window: NSWindow?
     private var pendingHide: DispatchWorkItem?
     private let dismissalDuration: TimeInterval = 0.36
+    private let spaceObserver = SpaceFollowingWindow.SpaceObserver()
     var onCancel: (() -> Void)?
 
     private init() {}
@@ -461,7 +462,12 @@ class SubtitleOverlay {
             self.viewModel.maxCapsuleWidth = self.maxCapsuleWidth()
             self.viewModel.show(appName: appName, appIcon: appIcon)
             self.ensureWindow()
-            self.window?.orderFront(nil)
+            self.beginSpaceFollowing()
+            // orderFrontRegardless keeps a non-activating menu-bar pill on the
+            // current Space; orderFront can leave it pinned to the first one.
+            if let window = self.window {
+                SpaceFollowingWindow.reaffirm(window)
+            }
             // First lay out the compact starting state, then animate to the
             // resting state on the next runloop. This keeps the shadow and
             // window frame stable while the pill does its small spring pop.
@@ -489,6 +495,7 @@ class SubtitleOverlay {
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 self.viewModel.finishHide()
+                self.spaceObserver.stop()
                 self.window?.orderOut(nil)
                 self.pendingHide = nil
             }
@@ -578,8 +585,7 @@ class SubtitleOverlay {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        SpaceFollowingWindow.configure(window)
         window.acceptsMouseMovedEvents = true
         window.ignoresMouseEvents = false
         hosting.wantsLayer = true
@@ -588,6 +594,21 @@ class SubtitleOverlay {
         window.contentView = hosting
 
         self.window = window
+    }
+
+    private func beginSpaceFollowing() {
+        spaceObserver.start(
+            shouldReassert: { [weak self] in
+                guard let self, let window = self.window else { return false }
+                // Keep the pill on the active Space only while it is fully shown.
+                return window.isVisible && self.viewModel.presentationPhase == .visible
+            },
+            handler: { [weak self] in
+                guard let self, let window = self.window else { return }
+                SpaceFollowingWindow.reaffirm(window)
+                self.repositionWindow()
+            }
+        )
     }
 
     private func maxCapsuleWidth() -> CGFloat {
