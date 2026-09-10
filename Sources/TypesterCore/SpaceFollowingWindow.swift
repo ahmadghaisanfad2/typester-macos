@@ -29,7 +29,7 @@ enum SpaceFollowingWindow {
     }
 
     /// Observe Space switches while `shouldReassert` returns true.
-    /// Call the returned token's `invalidate()` when the window is ordered out.
+    /// Call `stop()` when the window is ordered out.
     final class SpaceObserver {
         private var token: NSObjectProtocol?
 

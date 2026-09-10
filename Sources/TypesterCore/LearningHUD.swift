@@ -10,6 +10,7 @@ final class LearningHUD {
 
     private var window: NSWindow?
     private var hideWorkItem: DispatchWorkItem?
+    private var presentationID = UUID()
     private let visibleDuration: TimeInterval = 2.2
     private let dismissalDuration: TimeInterval = 0.28
     private let spaceObserver = SpaceFollowingWindow.SpaceObserver()
@@ -31,6 +32,8 @@ final class LearningHUD {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.hideWorkItem?.cancel()
+            let presentationID = UUID()
+            self.presentationID = presentationID
 
             let hosting = NSHostingView(rootView: LearningHUDView(text: text))
 
@@ -54,20 +57,9 @@ final class LearningHUD {
                 self.window = window
             }
 
-            // Size to the fitted capsule and center it near the bottom of the
-            // main screen, above where the dictation pill sits.
-            let fitting = hosting.fittingSize
-            guard fitting.width > 0, fitting.height > 0,
-                  let screen = NSScreen.main else { return }
-            let frame = NSRect(
-                x: screen.frame.midX - fitting.width / 2,
-                y: screen.frame.minY + 110,
-                width: fitting.width,
-                height: fitting.height
-            )
-            window.setFrame(frame, display: true)
             window.alphaValue = 0
             SpaceFollowingWindow.reaffirm(window)
+            self.reposition(window: window, hosting: hosting)
             self.beginSpaceFollowing()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
@@ -75,11 +67,24 @@ final class LearningHUD {
             }
 
             let hide = DispatchWorkItem { [weak self] in
-                self?.dismiss()
+                self?.dismiss(presentationID: presentationID)
             }
             self.hideWorkItem = hide
             DispatchQueue.main.asyncAfter(deadline: .now() + self.visibleDuration, execute: hide)
         }
+    }
+
+    private func reposition(window: NSWindow, hosting: NSHostingView<LearningHUDView>) {
+        let fitting = hosting.fittingSize
+        guard fitting.width > 0, fitting.height > 0,
+              let screen = NSScreen.main else { return }
+        let frame = NSRect(
+            x: screen.frame.midX - fitting.width / 2,
+            y: screen.frame.minY + 110,
+            width: fitting.width,
+            height: fitting.height
+        )
+        window.setFrame(frame, display: true)
     }
 
     private func beginSpaceFollowing() {
@@ -88,18 +93,21 @@ final class LearningHUD {
                 self?.window?.isVisible == true
             },
             handler: { [weak self] in
-                guard let self, let window = self.window else { return }
+                guard let self, let window = self.window,
+                      let hosting = window.contentView as? NSHostingView<LearningHUDView> else { return }
                 SpaceFollowingWindow.reaffirm(window)
+                self.reposition(window: window, hosting: hosting)
             }
         )
     }
 
-    private func dismiss() {
-        guard let window else { return }
+    private func dismiss(presentationID: UUID) {
+        guard presentationID == self.presentationID, let window else { return }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = dismissalDuration
             window.animator().alphaValue = 0
-        }, completionHandler: {
+        }, completionHandler: { [weak self, presentationID] in
+            guard let self, presentationID == self.presentationID else { return }
             self.spaceObserver.stop()
             window.orderOut(nil)
         })

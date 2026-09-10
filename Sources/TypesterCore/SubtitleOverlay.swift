@@ -600,7 +600,8 @@ class SubtitleOverlay {
         spaceObserver.start(
             shouldReassert: { [weak self] in
                 guard let self, let window = self.window else { return false }
-                return window.isVisible && self.viewModel.presentationPhase != .hidden
+                // Keep the pill on the active Space only while it is fully shown.
+                return window.isVisible && self.viewModel.presentationPhase == .visible
             },
             handler: { [weak self] in
                 guard let self, let window = self.window else { return }
