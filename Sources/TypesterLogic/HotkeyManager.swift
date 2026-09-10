@@ -20,8 +20,6 @@ public class HotkeyManager {
     private var pendingSingleTapUsedAsModifier = false
 
     public var onHotkeyTriggered: (() -> Void)?
-    /// Fired when Escape is pressed (global or local). Used to cancel dictation.
-    public var onEscapePressed: (() -> Void)?
 
     private init() {
         installCarbonHandler()
@@ -113,23 +111,16 @@ public class HotkeyManager {
             return event
         }
 
-        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyDown(event)
+        // keyDown monitors only invalidate pending single-tap chords.
+        // Escape cancel is handled by EscapeInterceptor (consuming CGEvent tap).
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            self?.noteKeyDownWhilePending()
         }
 
         localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyDown(event)
+            self?.noteKeyDownWhilePending()
             return event
         }
-    }
-
-    private func handleKeyDown(_ event: NSEvent) {
-        if Int(event.keyCode) == kVK_Escape {
-            DispatchQueue.main.async { [weak self] in
-                self?.onEscapePressed?()
-            }
-        }
-        noteKeyDownWhilePending()
     }
 
     private func noteKeyDownWhilePending() {

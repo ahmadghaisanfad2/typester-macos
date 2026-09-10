@@ -97,6 +97,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupIcons()
         setupStatusItem()
         setupHotkey()
+        setupEscapeInterceptor()
         setupPressKeyMonitor()
         setupAudioPipeline()
         setupPasteSuppression()
@@ -433,6 +434,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sttProvider.onDisconnected = { [weak self] in
             guard let self = self else { return }
             if self.isRetranscribing {
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
                 self.finishRetranscribe(success: false)
@@ -445,6 +447,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if self.isRecording {
                 self.beginConnectionRecovery()
             } else {
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
             }
@@ -482,6 +485,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self = self else { return }
             if self.sessionDiscarded {
                 self.sessionDiscarded = false
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.sttProvider.disconnect()
                 return
@@ -491,6 +495,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return
             }
             self.pasteAccumulatedTranscript(saveHistory: true)
+            self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
             self.sttProvider.disconnect()
         }
@@ -505,6 +510,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.sessionDiscarded = false
                 self.isRecording = false
                 self.statusItem.button?.image = self.normalIcon
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
                 self.sttProvider.disconnect()
@@ -518,6 +524,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             self.isRecording = false
             self.statusItem.button?.image = self.normalIcon
+            self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
             self.audioRecorder.stopRecording()
             let current = TranscriptPastePayload.resolve(
@@ -775,6 +782,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         audioRecorder.stopRecording()
         isRecording = false
         statusItem.button?.image = normalIcon
+        disarmEscapeCancel()
         subtitleOverlay.hide()
 
         let current = currentSessionText()
@@ -1342,6 +1350,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             appIcon: frontApp?.icon
         )
         subtitleOverlay.showProcessing()
+        armEscapeCancel()
 
         sttProvider.connect()
     }
@@ -1425,6 +1434,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Do not rely on the provider's disconnect callback to clean up the
         // processing pill. Some providers finalize before their socket emits
         // a disconnect event, which otherwise leaves the spinner on screen.
+        disarmEscapeCancel()
         subtitleOverlay.hide()
         Debug.log("Re-transcribe finished success=\(success)")
         rebuildMenu()
@@ -1544,10 +1554,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HotkeyManager.shared.onHotkeyTriggered = { [weak self] in
             self?.toggleRecording()
         }
-        HotkeyManager.shared.onEscapePressed = { [weak self] in
+        HotkeyManager.shared.registerHotkey()
+    }
+
+    /// Escape must be consumed via CGEvent tap — NSEvent monitors cannot swallow
+    /// keys, and the subtitle overlay never becomes key (target app stays focused).
+    private func setupEscapeInterceptor() {
+        EscapeInterceptor.shared.onEscapePressed = { [weak self] in
             self?.cancelRecording()
         }
-        HotkeyManager.shared.registerHotkey()
+        EscapeInterceptor.shared.start()
+    }
+
+    private func armEscapeCancel() {
+        EscapeInterceptor.shared.arm()
+    }
+
+    private func disarmEscapeCancel() {
+        EscapeInterceptor.shared.disarm()
     }
 
     // MARK: - Press-to-speak key monitor
@@ -1682,6 +1706,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appIcon = frontApp?.icon
         sessionAppName = appName
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
+        armEscapeCancel()
 
         syncAudioSampleRate()
         // Start audio immediately - it will buffer while WebSocket connects
@@ -1730,8 +1755,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Discard the current dictation without pasting (ESC).
     private func cancelRecording() {
-        Debug.log("cancelRecording() called, isRecording=\(isRecording)")
-        guard isRecording else { return }
+        let overlayActive = subtitleOverlay.viewModel.isActive
+        Debug.log(
+            "cancelRecording() called, isRecording=\(isRecording), isRetranscribing=\(isRetranscribing), overlayActive=\(overlayActive)"
+        )
+        let decision = EscapeCancelPolicy.decision(
+            isRecording: isRecording || isRetranscribing,
+            isOverlayActive: overlayActive
+        )
+        guard decision.shouldCancel else { return }
 
         cancelActiveTranscription()
     }
@@ -1769,6 +1801,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             FeedbackSoundPlayer.playStop()
         }
         audioRecorder.stopRecording()
+        disarmEscapeCancel()
         subtitleOverlay.hide()
         sttProvider.disconnect()
     }

@@ -90,25 +90,6 @@ public class PressKeyMonitor {
         usedAsModifier = false
     }
 
-    private func isConfiguredKeyDown(event: CGEvent) -> Bool {
-        let configuredKey = SettingsStore.shared.pressToSpeakKey
-        let rawFlags = event.flags.rawValue
-
-        switch configuredKey {
-        case .fn:
-            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(rawFlags))
-            return modifiers.contains(.function)
-        case .leftCommand:
-            return rawFlags & 0x00000008 != 0
-        case .rightCommand:
-            return rawFlags & 0x00000010 != 0
-        case .leftOption:
-            return rawFlags & 0x00000020 != 0
-        case .rightOption:
-            return rawFlags & 0x00000040 != 0
-        }
-    }
-
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap {
@@ -140,8 +121,20 @@ public class PressKeyMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        let keyName = SettingsStore.shared.pressToSpeakKey.displayName
-        let keyNowDown = isConfiguredKeyDown(event: event)
+        let configuredKey = SettingsStore.shared.pressToSpeakKey
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        // Fn: ignore flagsChanged from other keys (F-keys share SecondaryFn;
+        // Shift/etc. while holding Fn would otherwise look like Fn release).
+        guard PressKeyDetection.shouldApplyFlagsChanged(configured: configuredKey, keyCode: keyCode) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let keyName = configuredKey.displayName
+        let keyNowDown = PressKeyDetection.isKeyDown(
+            configured: configuredKey,
+            keyCode: keyCode,
+            flags: event.flags
+        )
 
         if keyNowDown && !isKeyDown {
             Debug.log("\(keyName) key DOWN detected")

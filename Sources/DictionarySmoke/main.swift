@@ -1,4 +1,5 @@
 import Foundation
+import Carbon.HIToolbox
 import TypesterCore
 
 func expect(_ condition: Bool, _ message: String) {
@@ -136,6 +137,38 @@ do {
     } else {
         expect(false, "update available outcome")
     }
+}
+
+// Press-to-speak Fn detection: only physical Fn (keyCode 63), not F-keys.
+do {
+    let fnFlags = CGEventFlags.maskSecondaryFn
+    expect(
+        PressKeyDetection.isKeyDown(configured: .fn, keyCode: 63, flags: fnFlags),
+        "Fn down on keyCode 63"
+    )
+    expect(
+        !PressKeyDetection.isKeyDown(configured: .fn, keyCode: Int64(kVK_F5), flags: fnFlags),
+        "F5 with SecondaryFn is not Fn"
+    )
+    expect(
+        PressKeyDetection.shouldApplyFlagsChanged(configured: .fn, keyCode: 63),
+        "apply Fn flagsChanged for keyCode 63"
+    )
+    expect(
+        !PressKeyDetection.shouldApplyFlagsChanged(configured: .fn, keyCode: Int64(kVK_Shift)),
+        "ignore unrelated flagsChanged while tracking Fn"
+    )
+}
+
+// ESC cancel: consume while recording OR overlay processing.
+do {
+    let recording = EscapeCancelPolicy.decision(isRecording: true, isOverlayActive: false)
+    expect(recording.shouldCancel && recording.shouldConsumeEvent, "ESC while recording")
+    let processing = EscapeCancelPolicy.decision(isRecording: false, isOverlayActive: true)
+    expect(processing.shouldCancel && processing.shouldConsumeEvent, "ESC while overlay active")
+    let idle = EscapeCancelPolicy.decision(isRecording: false, isOverlayActive: false)
+    expect(!idle.shouldCancel && !idle.shouldConsumeEvent, "ESC ignored when idle")
+    expect(EscapeCancelPolicy.isEscapeKeyCode(53), "Escape keyCode 53")
 }
 
 print("All smoke checks passed.")
