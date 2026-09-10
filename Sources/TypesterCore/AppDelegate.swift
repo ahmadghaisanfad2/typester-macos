@@ -10,6 +10,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var teachWindow: NSWindow?
+    private var permissionRecoveryWindow: NSWindow?
+    private var didOfferPostUpdateRecovery = false
 
     private let audioRecorder = AudioRecorder()
     private let textPaster = TextPaster()
@@ -97,9 +99,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupIcons()
         setupStatusItem()
         setupHotkey()
+        setupEscapeInterceptor()
         setupPressKeyMonitor()
         setupAudioPipeline()
         setupPasteSuppression()
+        setupAccessibilityTrustMonitoring()
 
         if let latest = historyStore.entries.first(where: { $0.hasText }) {
             lastTranscript = latest.text
@@ -117,20 +121,45 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: .automaticDictionaryLearningChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessibilityTrustChanged(_:)),
+            name: .accessibilityTrustChanged,
+            object: nil
+        )
 
-        // Show onboarding if selected provider has no API key. Reading the
-        // existing key may trigger macOS's one-time Keychain prompt after the
-        // stable-signing migration; the follow-up notice explains that prompt.
+        // Show onboarding when the provider has no API key, OR when mic /
+        // Accessibility are still missing (reinstall keeps the key in Keychain
+        // but TCC grants do not always survive). Users finish both permissions
+        // in the front — not after a dead hotkey. Reading the existing key may
+        // trigger macOS's one-time Keychain prompt after the stable-signing
+        // migration; the follow-up notice explains that prompt.
         // QA-only environment hooks bypass that read so the migration notice
         // and paste-learning path can be verified without modifying Keychain.
         let environment = ProcessInfo.processInfo.environment
         let isQALaunch = environment["TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE"] == "1"
             || environment["TYPESTER_QA_PASTE"] != nil
         let hasConfiguredAPIKey = isQALaunch || hasAPIKeyForCurrentProvider()
+        let microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        let accessibilityGranted = TextPaster.checkAccessibilityPermission()
+        let needsPermissionSetup = PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: hasConfiguredAPIKey,
+            microphoneGranted: microphoneGranted,
+            accessibilityGranted: accessibilityGranted
+        )
+        // Lost grant after an update → recovery panel (one click). Never
+        // granted / incomplete first run → onboarding, which is clearer.
+        let lostPreviouslyGrantedAccessibility =
+            accessibilityGranted == false
+            && PermissionRecovery.lastKnownAccessibilityTrusted()
+
         if !hasConfiguredAPIKey {
+            showOnboarding()
+        } else if needsPermissionSetup && !lostPreviouslyGrantedAccessibility {
             showOnboarding()
         } else {
             updateMonitoringMode()
+            offerPermissionRecoveryAfterUpdateIfNeeded()
         }
         scheduleStableSigningMigrationNoticeIfNeeded(
             hasConfiguredAPIKey: hasConfiguredAPIKey
@@ -366,6 +395,98 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateActivationPolicy()
     }
 
+    // MARK: - Accessibility recovery
+
+    private func setupAccessibilityTrustMonitoring() {
+        AccessibilityTrustMonitor.shared.start()
+        PermissionRecovery.resetSessionDismissal()
+    }
+
+    /// When Accessibility was trusted before and is missing now (post-update TCC reset),
+    /// show the one-click recovery sheet instead of leaving the hotkey silently dead.
+    private func offerPermissionRecoveryAfterUpdateIfNeeded() {
+        guard !didOfferPostUpdateRecovery else { return }
+
+        let currentlyTrusted = TextPaster.checkAccessibilityPermission()
+        let lastKnownTrusted = PermissionRecovery.lastKnownAccessibilityTrusted()
+
+        guard PermissionRecovery.shouldOfferRecoveryAfterUpdate(
+            lastKnownTrusted: lastKnownTrusted,
+            currentlyTrusted: currentlyTrusted
+        ) else {
+            PermissionRecovery.markAccessibilityTrusted(currentlyTrusted)
+            return
+        }
+
+        // Keep lastKnownTrusted=true until access is restored so a quit-and-relaunch
+        // without granting still surfaces the sheet (failed activation also recovers).
+        didOfferPostUpdateRecovery = true
+        PermissionRecovery.resetSessionDismissal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.showPermissionRecovery()
+        }
+    }
+
+    @objc private func accessibilityTrustChanged(_ note: Notification) {
+        let trusted = (note.object as? Bool) ?? TextPaster.checkAccessibilityPermission()
+        Debug.log("Accessibility trust changed trusted=\(trusted)")
+        guard trusted else { return }
+        // Re-arm event taps that need Accessibility without forcing a relaunch.
+        DispatchQueue.main.async { [weak self] in
+            self?.setupEscapeInterceptor()
+            self?.updateMonitoringMode()
+            self?.permissionRecoveryWindow?.close()
+            self?.permissionRecoveryWindow = nil
+        }
+    }
+
+    /// Blocks activation and surfaces recovery when Accessibility is missing.
+    /// Returns false when the caller should not proceed.
+    @discardableResult
+    private func ensureAccessibilityForDictation() -> Bool {
+        if TextPaster.checkAccessibilityPermission() {
+            PermissionRecovery.markAccessibilityTrusted(true)
+            return true
+        }
+        // Do not clear lastKnownTrusted here — a lost grant should keep offering
+        // recovery on the next launch until the user restores access.
+        Debug.log("Dictation blocked: Accessibility not trusted")
+        if PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: PermissionRecovery.recoveryDismissedForSession()
+        ) {
+            showPermissionRecovery()
+        }
+        return false
+    }
+
+    private func showPermissionRecovery() {
+        if let window = permissionRecoveryWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = PermissionRecoveryView(
+            onDismiss: { [weak self] in
+                self?.permissionRecoveryWindow?.close()
+                self?.permissionRecoveryWindow = nil
+            },
+            onRelaunch: {
+                TextPaster.relaunchApp()
+            }
+        )
+        let hosting = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Fix dictation access"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        permissionRecoveryWindow = window
+        presentUtilityWindow(window)
+    }
+
     @objc private func automaticDictionaryLearningChanged() {
         if !SettingsStore.shared.automaticDictionaryLearningEnabled {
             automaticCorrectionMonitor.cancel()
@@ -433,6 +554,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sttProvider.onDisconnected = { [weak self] in
             guard let self = self else { return }
             if self.isRetranscribing {
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
                 self.finishRetranscribe(success: false)
@@ -445,6 +567,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if self.isRecording {
                 self.beginConnectionRecovery()
             } else {
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
             }
@@ -482,6 +605,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self = self else { return }
             if self.sessionDiscarded {
                 self.sessionDiscarded = false
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.sttProvider.disconnect()
                 return
@@ -491,6 +615,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return
             }
             self.pasteAccumulatedTranscript(saveHistory: true)
+            self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
             self.sttProvider.disconnect()
         }
@@ -505,6 +630,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.sessionDiscarded = false
                 self.isRecording = false
                 self.statusItem.button?.image = self.normalIcon
+                self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
                 self.audioRecorder.stopRecording()
                 self.sttProvider.disconnect()
@@ -518,6 +644,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             self.isRecording = false
             self.statusItem.button?.image = self.normalIcon
+            self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
             self.audioRecorder.stopRecording()
             let current = TranscriptPastePayload.resolve(
@@ -775,6 +902,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         audioRecorder.stopRecording()
         isRecording = false
         statusItem.button?.image = normalIcon
+        disarmEscapeCancel()
         subtitleOverlay.hide()
 
         let current = currentSessionText()
@@ -1342,6 +1470,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             appIcon: frontApp?.icon
         )
         subtitleOverlay.showProcessing()
+        armEscapeCancel()
 
         sttProvider.connect()
     }
@@ -1425,6 +1554,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Do not rely on the provider's disconnect callback to clean up the
         // processing pill. Some providers finalize before their socket emits
         // a disconnect event, which otherwise leaves the spinner on screen.
+        disarmEscapeCancel()
         subtitleOverlay.hide()
         Debug.log("Re-transcribe finished success=\(success)")
         rebuildMenu()
@@ -1544,10 +1674,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HotkeyManager.shared.onHotkeyTriggered = { [weak self] in
             self?.toggleRecording()
         }
-        HotkeyManager.shared.onEscapePressed = { [weak self] in
+        HotkeyManager.shared.registerHotkey()
+    }
+
+    /// Escape must be consumed via CGEvent tap — NSEvent monitors cannot swallow
+    /// keys, and the subtitle overlay never becomes key (target app stays focused).
+    private func setupEscapeInterceptor() {
+        EscapeInterceptor.shared.onEscapePressed = { [weak self] in
             self?.cancelRecording()
         }
-        HotkeyManager.shared.registerHotkey()
+        EscapeInterceptor.shared.start()
+    }
+
+    private func armEscapeCancel() {
+        EscapeInterceptor.shared.arm()
+    }
+
+    private func disarmEscapeCancel() {
+        EscapeInterceptor.shared.disarm()
     }
 
     // MARK: - Press-to-speak key monitor
@@ -1652,6 +1796,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
 
+        // Paste and press-to-speak both need Accessibility. After an ad-hoc
+        // update macOS drops the grant and the hotkey appears dead.
+        guard ensureAccessibilityForDictation() else { return }
+
         guard hasAPIKeyForCurrentProvider() else {
             Debug.log("startRecording() SKIPPED - no API key for \(SettingsStore.shared.sttProvider)")
             openSettings()
@@ -1682,6 +1830,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appIcon = frontApp?.icon
         sessionAppName = appName
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
+        armEscapeCancel()
 
         syncAudioSampleRate()
         // Start audio immediately - it will buffer while WebSocket connects
@@ -1730,8 +1879,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Discard the current dictation without pasting (ESC).
     private func cancelRecording() {
-        Debug.log("cancelRecording() called, isRecording=\(isRecording)")
-        guard isRecording else { return }
+        let overlayActive = subtitleOverlay.viewModel.isActive
+        Debug.log(
+            "cancelRecording() called, isRecording=\(isRecording), isRetranscribing=\(isRetranscribing), overlayActive=\(overlayActive)"
+        )
+        let decision = EscapeCancelPolicy.decision(
+            isRecording: isRecording || isRetranscribing,
+            isOverlayActive: overlayActive
+        )
+        guard decision.shouldCancel else { return }
 
         cancelActiveTranscription()
     }
@@ -1769,6 +1925,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             FeedbackSoundPlayer.playStop()
         }
         audioRecorder.stopRecording()
+        disarmEscapeCancel()
         subtitleOverlay.hide()
         sttProvider.disconnect()
     }
@@ -1914,7 +2071,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // isVisible == true inside willClose, so it must be excluded or the
         // Dock icon never hides.
         let closingWindow = notification.object as? NSWindow
-        let remainingWindows = [settingsWindow, onboardingWindow, teachWindow].compactMap { $0 }
+        if let closingWindow, closingWindow === permissionRecoveryWindow {
+            permissionRecoveryWindow = nil
+        }
+        let remainingWindows = [settingsWindow, onboardingWindow, teachWindow, permissionRecoveryWindow].compactMap { $0 }
         let stillOpen = remainingWindows.contains { $0.isVisible && $0 !== closingWindow }
         if !stillOpen {
             DispatchQueue.main.async { [weak self] in
@@ -1927,10 +2087,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showOnboarding() {
         if onboardingWindow == nil {
-            let onboardingView = OnboardingView {
+            let hasAPIKey = hasAPIKeyForCurrentProvider()
+            let microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+            let accessibilityGranted = TextPaster.checkAccessibilityPermission()
+            let startStep = PermissionSetup.startStep(
+                hasAPIKey: hasAPIKey,
+                microphoneGranted: microphoneGranted,
+                accessibilityGranted: accessibilityGranted
+            )
+            let onboardingView = OnboardingView(initialStep: startStep.rawValue) {
                 self.onboardingWindow?.close()
                 self.onboardingWindow = nil
+                // Re-arm hotkey / press-to-speak / Esc without requiring a relaunch.
+                self.setupEscapeInterceptor()
                 self.updateMonitoringMode()
+                if TextPaster.checkAccessibilityPermission() {
+                    PermissionRecovery.markAccessibilityTrusted(true)
+                }
             }
             let hostingController = NSHostingController(rootView: onboardingView)
             let window = NSWindow(contentViewController: hostingController)

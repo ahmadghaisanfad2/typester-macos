@@ -1,4 +1,5 @@
 import Foundation
+import Carbon.HIToolbox
 import TypesterCore
 
 func expect(_ condition: Bool, _ message: String) {
@@ -138,4 +139,124 @@ do {
     }
 }
 
+// Press-to-speak Fn detection: only physical Fn (keyCode 63), not F-keys.
+do {
+    let fnFlags = CGEventFlags.maskSecondaryFn
+    expect(
+        PressKeyDetection.isKeyDown(configured: .fn, keyCode: 63, flags: fnFlags),
+        "Fn down on keyCode 63"
+    )
+    expect(
+        !PressKeyDetection.isKeyDown(configured: .fn, keyCode: Int64(kVK_F5), flags: fnFlags),
+        "F5 with SecondaryFn is not Fn"
+    )
+    expect(
+        PressKeyDetection.shouldApplyFlagsChanged(configured: .fn, keyCode: 63),
+        "apply Fn flagsChanged for keyCode 63"
+    )
+    expect(
+        !PressKeyDetection.shouldApplyFlagsChanged(configured: .fn, keyCode: Int64(kVK_Shift)),
+        "ignore unrelated flagsChanged while tracking Fn"
+    )
+}
+
+// ESC cancel: consume while recording OR overlay processing.
+do {
+    let recording = EscapeCancelPolicy.decision(isRecording: true, isOverlayActive: false)
+    expect(recording.shouldCancel && recording.shouldConsumeEvent, "ESC while recording")
+    let processing = EscapeCancelPolicy.decision(isRecording: false, isOverlayActive: true)
+    expect(processing.shouldCancel && processing.shouldConsumeEvent, "ESC while overlay active")
+    let idle = EscapeCancelPolicy.decision(isRecording: false, isOverlayActive: false)
+    expect(!idle.shouldCancel && !idle.shouldConsumeEvent, "ESC ignored when idle")
+    expect(EscapeCancelPolicy.isEscapeKeyCode(53), "Escape keyCode 53")
+}
+
+// Permission recovery: only after a lost grant, not first install.
+do {
+    expect(
+        PermissionRecovery.shouldOfferRecoveryAfterUpdate(lastKnownTrusted: true, currentlyTrusted: false),
+        "recovery when trust was lost"
+    )
+    expect(
+        !PermissionRecovery.shouldOfferRecoveryAfterUpdate(lastKnownTrusted: false, currentlyTrusted: false),
+        "no recovery on first install"
+    )
+    expect(
+        PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: false
+        ),
+        "recovery on failed activation"
+    )
+    expect(
+        !PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: true
+        ),
+        "no recovery after session dismiss"
+    )
+}
+
+// Permission setup: front-load onboarding until mic + accessibility are granted.
+do {
+    expect(
+        PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: false,
+            microphoneGranted: false,
+            accessibilityGranted: false
+        ),
+        "fresh install shows onboarding"
+    )
+    expect(
+        PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: false
+        ),
+        "API key alone still shows onboarding for accessibility"
+    )
+    expect(
+        !PermissionSetup.shouldShowOnboarding(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: true
+        ),
+        "fully configured skips onboarding"
+    )
+    expect(
+        PermissionSetup.startStep(
+            hasAPIKey: true,
+            microphoneGranted: false,
+            accessibilityGranted: false
+        ) == .microphone,
+        "resume at microphone when mic missing"
+    )
+    expect(
+        PermissionSetup.startStep(
+            hasAPIKey: true,
+            microphoneGranted: true,
+            accessibilityGranted: false
+        ) == .accessibility,
+        "resume at accessibility when only AX missing"
+    )
+}
+
+// Modifier keyDown in a focused text field must not cancel hotkey activation.
+do {
+    expect(
+        !KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_Command)),
+        "Command keyDown does not cancel pending tap"
+    )
+    expect(
+        !KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_Function)),
+        "Fn keyDown does not cancel pending tap"
+    )
+    expect(
+        KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: Int64(kVK_ANSI_C)),
+        "C keyDown cancels pending tap (real chord)"
+    )
+}
+
 print("All smoke checks passed.")
+
+

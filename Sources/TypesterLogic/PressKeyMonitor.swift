@@ -46,7 +46,9 @@ public class PressKeyMonitor {
         eventMask |= (1 << CGEventType.keyDown.rawValue)
 
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
+            // HID tap sees flagsChanged more reliably while a text field has focus
+            // than a session tap (secure input / session-level filtering).
+            tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
             eventsOfInterest: eventMask,
@@ -90,25 +92,6 @@ public class PressKeyMonitor {
         usedAsModifier = false
     }
 
-    private func isConfiguredKeyDown(event: CGEvent) -> Bool {
-        let configuredKey = SettingsStore.shared.pressToSpeakKey
-        let rawFlags = event.flags.rawValue
-
-        switch configuredKey {
-        case .fn:
-            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(rawFlags))
-            return modifiers.contains(.function)
-        case .leftCommand:
-            return rawFlags & 0x00000008 != 0
-        case .rightCommand:
-            return rawFlags & 0x00000010 != 0
-        case .leftOption:
-            return rawFlags & 0x00000020 != 0
-        case .rightOption:
-            return rawFlags & 0x00000040 != 0
-        }
-    }
-
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap {
@@ -123,6 +106,12 @@ public class PressKeyMonitor {
 
         // If another key is pressed while our key is held, it's being used as a modifier
         if type == .keyDown && isKeyDown && needsKeyDownMonitoring {
+            let downKeyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            // Focused text fields can emit keyDown for the modifier itself
+            // (e.g. Command while holding Command). That is not a chord.
+            guard KeyDownChordPolicy.shouldCancelPendingActivation(keyCode: downKeyCode) else {
+                return Unmanaged.passUnretained(event)
+            }
             Debug.log("Key pressed while modifier held — treating as modifier combo, cancelling activation")
             usedAsModifier = true
             activationTimer?.cancel()
@@ -140,8 +129,20 @@ public class PressKeyMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        let keyName = SettingsStore.shared.pressToSpeakKey.displayName
-        let keyNowDown = isConfiguredKeyDown(event: event)
+        let configuredKey = SettingsStore.shared.pressToSpeakKey
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        // Fn: ignore flagsChanged from other keys (F-keys share SecondaryFn;
+        // Shift/etc. while holding Fn would otherwise look like Fn release).
+        guard PressKeyDetection.shouldApplyFlagsChanged(configured: configuredKey, keyCode: keyCode) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let keyName = configuredKey.displayName
+        let keyNowDown = PressKeyDetection.isKeyDown(
+            configured: configuredKey,
+            keyCode: keyCode,
+            flags: event.flags
+        )
 
         if keyNowDown && !isKeyDown {
             Debug.log("\(keyName) key DOWN detected")

@@ -37,6 +37,15 @@ jobs:
           sed -i.bak "s/^VERSION=.*/VERSION=\"${{ steps.version.outputs.version }}\"/" scripts/build-release.sh
           rm -f scripts/build-release.sh.bak
 
+      # Import the stable "Typester Developer" identity so this DMG keeps the same
+      # designated requirement as local releases. Without it, CI ad-hoc signs and
+      # every update drops Accessibility / Microphone (press-to-speak and paste die).
+      - name: Import stable signing identity
+        env:
+          TYPESTER_SIGNING_P12_BASE64: ${{ secrets.TYPESTER_SIGNING_P12_BASE64 }}
+          TYPESTER_SIGNING_P12_PASSWORD: ${{ secrets.TYPESTER_SIGNING_P12_PASSWORD }}
+        run: ./scripts/ci-setup-signing.sh
+
       - name: Build DMG
         run: ./scripts/build-release.sh
 
@@ -66,6 +75,11 @@ jobs:
           ### Updating
           Already running Typester 1.15.0 or newer? Update from the app itself — menu bar
           icon → Check for Updates… (or Settings → Check for Updates).
+
+          ### Permissions
+          Builds signed with the stable Typester identity keep Accessibility and Microphone
+          across updates. If you upgraded from an ad-hoc build and dictation stops working,
+          open Typester → Fix access (or Settings → Permissions) and relaunch once.
           EOF
 
           if gh release view "$TAG" >/dev/null 2>&1; then
