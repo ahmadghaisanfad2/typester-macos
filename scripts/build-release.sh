@@ -105,9 +105,11 @@ ENTITLEMENTS="$PROJECT_DIR/Sources/typester.entitlements"
 # Signing priority: Developer ID > stable self-signed "Typester Developer" > ad-hoc.
 # The stable identity keeps the code signature's designated requirement identical
 # across builds, so macOS TCC (Accessibility, Microphone) survives app updates.
+# CI imports the same identity via scripts/ci-setup-signing.sh into TYPESTER_CI_SIGNING_KEYCHAIN.
 STABLE_IDENTITY="Typester Developer"
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/typester-signing.keychain-db"
+SIGNING_KEYCHAIN="${TYPESTER_CI_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/typester-signing.keychain-db}"
 KEYCHAIN_PASS_FILE="$PROJECT_DIR/dist/signing/keychain.passphrase"
+CI_KEYCHAIN="${TYPESTER_CI_SIGNING_KEYCHAIN:-}"
 
 SIGNING_MODE="adhoc"
 SIGNING_IDENTITY="-"
@@ -115,6 +117,11 @@ SIGNING_IDENTITY="-"
 if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
     SIGNING_MODE="developer-id"
     SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+elif [[ -n "$CI_KEYCHAIN" ]] \
+    && security find-identity -v -p codesigning "$CI_KEYCHAIN" 2>/dev/null | grep -q "\"$STABLE_IDENTITY\""; then
+    # CI path: keychain is already unlocked and on the search list.
+    SIGNING_MODE="stable"
+    SIGNING_IDENTITY="$STABLE_IDENTITY"
 elif [[ -f "$SIGNING_KEYCHAIN" && -f "$KEYCHAIN_PASS_FILE" ]] \
     && security unlock-keychain -p "$(cat "$KEYCHAIN_PASS_FILE")" "$SIGNING_KEYCHAIN" 2>/dev/null \
     && security find-identity "$SIGNING_KEYCHAIN" 2>/dev/null | grep -q "\"$STABLE_IDENTITY\""; then
@@ -123,6 +130,7 @@ elif [[ -f "$SIGNING_KEYCHAIN" && -f "$KEYCHAIN_PASS_FILE" ]] \
 else
     echo "==> No Developer ID certificate and no stable signing identity."
     echo "    Run scripts/setup-signing.sh once so TCC permissions survive updates."
+    echo "    CI: set TYPESTER_SIGNING_P12_BASE64 and TYPESTER_SIGNING_P12_PASSWORD secrets."
 fi
 
 echo "==> Signing app ($SIGNING_MODE) with: $SIGNING_IDENTITY"

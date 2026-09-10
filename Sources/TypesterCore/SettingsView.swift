@@ -798,8 +798,8 @@ struct SettingsView: View {
             SettingsRow(
                 "Accessibility",
                 help: accessibilityGranted
-                    ? "Needed to paste text into other apps. Later updates keep this grant."
-                    : "Drag the Typester icon into Privacy & Security → Accessibility. If the toggle is already on, remove Typester first, drop the icon in, then Relaunch — macOS does not apply a new grant until Typester restarts.",
+                    ? "Needed to paste text into other apps and to activate dictation. Later updates keep this grant."
+                    : "Drag the Typester icon into Privacy & Security → Accessibility, then Relaunch. If the toggle is already on, remove Typester first and add it again — after an ad-hoc update macOS treats the app as new until this is fixed.",
                 showsDivider: false
             ) {
                 HStack(spacing: 8) {
@@ -1293,10 +1293,19 @@ class ShortcutRecorderNSView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil {
+            isRecording = false
+            pendingModifierIdentity = nil
+            pendingUsedAsChord = false
+        }
         setupMonitor()
     }
 
     private func setupMonitor() {
+        if let existing = monitor {
+            NSEvent.removeMonitor(existing)
+            monitor = nil
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self = self, self.isRecording else { return event }
 

@@ -10,6 +10,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var teachWindow: NSWindow?
+    private var permissionRecoveryWindow: NSWindow?
+    private var didOfferPostUpdateRecovery = false
 
     private let audioRecorder = AudioRecorder()
     private let textPaster = TextPaster()
@@ -101,6 +103,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupPressKeyMonitor()
         setupAudioPipeline()
         setupPasteSuppression()
+        setupAccessibilityTrustMonitoring()
 
         if let latest = historyStore.entries.first(where: { $0.hasText }) {
             lastTranscript = latest.text
@@ -118,6 +121,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: .automaticDictionaryLearningChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessibilityTrustChanged(_:)),
+            name: .accessibilityTrustChanged,
+            object: nil
+        )
 
         // Show onboarding if selected provider has no API key. Reading the
         // existing key may trigger macOS's one-time Keychain prompt after the
@@ -132,6 +141,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showOnboarding()
         } else {
             updateMonitoringMode()
+            offerPermissionRecoveryAfterUpdateIfNeeded()
         }
         scheduleStableSigningMigrationNoticeIfNeeded(
             hasConfiguredAPIKey: hasConfiguredAPIKey
@@ -365,6 +375,98 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateSTTProvider()
         rebuildMenu()
         updateActivationPolicy()
+    }
+
+    // MARK: - Accessibility recovery
+
+    private func setupAccessibilityTrustMonitoring() {
+        AccessibilityTrustMonitor.shared.start()
+        PermissionRecovery.resetSessionDismissal()
+    }
+
+    /// When Accessibility was trusted before and is missing now (post-update TCC reset),
+    /// show the one-click recovery sheet instead of leaving the hotkey silently dead.
+    private func offerPermissionRecoveryAfterUpdateIfNeeded() {
+        guard !didOfferPostUpdateRecovery else { return }
+
+        let currentlyTrusted = TextPaster.checkAccessibilityPermission()
+        let lastKnownTrusted = PermissionRecovery.lastKnownAccessibilityTrusted()
+
+        guard PermissionRecovery.shouldOfferRecoveryAfterUpdate(
+            lastKnownTrusted: lastKnownTrusted,
+            currentlyTrusted: currentlyTrusted
+        ) else {
+            PermissionRecovery.markAccessibilityTrusted(currentlyTrusted)
+            return
+        }
+
+        // Keep lastKnownTrusted=true until access is restored so a quit-and-relaunch
+        // without granting still surfaces the sheet (failed activation also recovers).
+        didOfferPostUpdateRecovery = true
+        PermissionRecovery.resetSessionDismissal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.showPermissionRecovery()
+        }
+    }
+
+    @objc private func accessibilityTrustChanged(_ note: Notification) {
+        let trusted = (note.object as? Bool) ?? TextPaster.checkAccessibilityPermission()
+        Debug.log("Accessibility trust changed trusted=\(trusted)")
+        guard trusted else { return }
+        // Re-arm event taps that need Accessibility without forcing a relaunch.
+        DispatchQueue.main.async { [weak self] in
+            self?.setupEscapeInterceptor()
+            self?.updateMonitoringMode()
+            self?.permissionRecoveryWindow?.close()
+            self?.permissionRecoveryWindow = nil
+        }
+    }
+
+    /// Blocks activation and surfaces recovery when Accessibility is missing.
+    /// Returns false when the caller should not proceed.
+    @discardableResult
+    private func ensureAccessibilityForDictation() -> Bool {
+        if TextPaster.checkAccessibilityPermission() {
+            PermissionRecovery.markAccessibilityTrusted(true)
+            return true
+        }
+        // Do not clear lastKnownTrusted here — a lost grant should keep offering
+        // recovery on the next launch until the user restores access.
+        Debug.log("Dictation blocked: Accessibility not trusted")
+        if PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: PermissionRecovery.recoveryDismissedForSession()
+        ) {
+            showPermissionRecovery()
+        }
+        return false
+    }
+
+    private func showPermissionRecovery() {
+        if let window = permissionRecoveryWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = PermissionRecoveryView(
+            onDismiss: { [weak self] in
+                self?.permissionRecoveryWindow?.close()
+                self?.permissionRecoveryWindow = nil
+            },
+            onRelaunch: {
+                TextPaster.relaunchApp()
+            }
+        )
+        let hosting = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Fix dictation access"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        permissionRecoveryWindow = window
+        presentUtilityWindow(window)
     }
 
     @objc private func automaticDictionaryLearningChanged() {
@@ -1676,6 +1778,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
 
+        // Paste and press-to-speak both need Accessibility. After an ad-hoc
+        // update macOS drops the grant and the hotkey appears dead.
+        guard ensureAccessibilityForDictation() else { return }
+
         guard hasAPIKeyForCurrentProvider() else {
             Debug.log("startRecording() SKIPPED - no API key for \(SettingsStore.shared.sttProvider)")
             openSettings()
@@ -1947,7 +2053,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // isVisible == true inside willClose, so it must be excluded or the
         // Dock icon never hides.
         let closingWindow = notification.object as? NSWindow
-        let remainingWindows = [settingsWindow, onboardingWindow, teachWindow].compactMap { $0 }
+        if let closingWindow, closingWindow === permissionRecoveryWindow {
+            permissionRecoveryWindow = nil
+        }
+        let remainingWindows = [settingsWindow, onboardingWindow, teachWindow, permissionRecoveryWindow].compactMap { $0 }
         let stillOpen = remainingWindows.contains { $0.isVisible && $0 !== closingWindow }
         if !stillOpen {
             DispatchQueue.main.async { [weak self] in

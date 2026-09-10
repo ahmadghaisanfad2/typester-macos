@@ -171,4 +171,30 @@ do {
     expect(EscapeCancelPolicy.isEscapeKeyCode(53), "Escape keyCode 53")
 }
 
+// Permission recovery: only after a lost grant, not first install.
+do {
+    expect(
+        PermissionRecovery.shouldOfferRecoveryAfterUpdate(lastKnownTrusted: true, currentlyTrusted: false),
+        "recovery when trust was lost"
+    )
+    expect(
+        !PermissionRecovery.shouldOfferRecoveryAfterUpdate(lastKnownTrusted: false, currentlyTrusted: false),
+        "no recovery on first install"
+    )
+    expect(
+        PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: false
+        ),
+        "recovery on failed activation"
+    )
+    expect(
+        !PermissionRecovery.shouldShowRecoveryOnFailedActivation(
+            currentlyTrusted: false,
+            alreadyDismissedThisSession: true
+        ),
+        "no recovery after session dismiss"
+    )
+}
+
 print("All smoke checks passed.")

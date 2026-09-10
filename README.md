@@ -58,6 +58,13 @@ From 1.15.0 onward, Typester updates itself: menu bar icon → **Check for Updat
 (or Settings → Check for Updates). The update downloads, installs in place, and
 relaunches.
 
+**Permissions across updates.** Releases signed with the stable Typester identity
+keep Accessibility and Microphone — no re-grant. If you install an ad-hoc signed
+build (for example a CI artifact before the signing secrets were configured),
+macOS treats Typester as a new app and drops those grants. In that case Typester
+shows a **Fix dictation access** panel (drag the icon into Accessibility, then
+Relaunch). After that one-time fix, later stable-signed updates keep the grant.
+
 **One-time migration from 1.15.2 or earlier:** Typester 1.16 introduced a stable
 signing identity, so the old Keychain and Accessibility authorization does not
 transfer automatically. When Keychain asks about your existing API key, enter
@@ -110,6 +117,21 @@ This creates a universal binary (arm64 + x86_64), signs it if you have a Develop
 ```
 
 This builds the DMG, then creates (or updates) a `vX.Y.Z` release on your fork with the DMG attached. In Settings, **Check for Updates** compares the running app to that release and can download the DMG.
+
+**GitHub Actions releases (stable signing):**
+
+CI ad-hoc signs by default, which drops Accessibility/Microphone on every
+update. Configure these repository secrets once so Actions builds keep the same
+identity as local `setup-signing.sh` builds:
+
+| Secret | Value |
+| --- | --- |
+| `TYPESTER_SIGNING_P12_BASE64` | `base64 < dist/signing/TypesterDeveloper.p12` |
+| `TYPESTER_SIGNING_P12_PASSWORD` | contents of `dist/signing/TypesterDeveloper.p12.pass` |
+
+Then tag/push or run the Release workflow. The first install of a stably signed
+CI build may still need one Accessibility re-grant if the previous release was
+ad-hoc; after that, updates keep the grant.
 
 Requirements for building:
 - Swift 5.9 or later
