@@ -1,14 +1,25 @@
 ---
 feature: pill-follows-active-space
-status: in-progress
+status: delivered
 updated: 2026-09-11
 branch: fix/pill-follows-active-space
-commits: 555212e..<head>
+commits: 555212e..643b571
 ---
 
 # Pill Follows Active Space
 
 ## Report
+
+**What was built** — The caption pill and learning HUD toast now stay on every macOS Space while visible. Overlay windows use a shared `SpaceFollowingWindow` helper: `.statusBar` level, `[.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`, immovable, and presented with `orderFrontRegardless()`. While shown, both windows re-assert Space membership and re-center on `NSScreen.main` when `NSWorkspace.activeSpaceDidChangeNotification` fires; observers are removed on hide. LearningHUD dismiss completions are generation-guarded so a rapid re-show cannot be ordered out by a stale fade.
+
+**Verification** — `swift build --target TypesterUI` PASS; `swift test` PASS (175 tests, 0 failures). Independent review of `555212e..d8c6684` requested changes (LearningHUD dismiss race, missing re-center); fixes landed in `643b571` and re-review approved.
+
+**Journey log**
+1. Existing `.floating` + `.canJoinAllSpaces` + `orderFront(nil)` was insufficient for this `LSUIElement` app — AppKit can pin the window to the first Space.
+2. Raised level to `.statusBar` and switched to `orderFrontRegardless()`; added Space-change reassert rather than relying on one-shot flags.
+3. Review found LearningHUD could kill a newly shown toast from a stale dismiss completion; fixed with `presentationID` generation checks.
+4. LearningHUD was also missing re-center on Space change; extracted `reposition(window:hosting:)`.
+5. AppKit HUD window config is not covered by the logic test target; residual manual check is switching Spaces while dictating.
 
 ## [S1] Problem
 
