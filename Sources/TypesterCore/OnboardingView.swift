@@ -4,6 +4,7 @@ import AVFoundation
 
 struct OnboardingView: View {
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var openRouterModels = OpenRouterModelsStore.shared
     @State private var apiKeyInput = ""
     @State private var currentStep = 1
     @State private var micGranted = false
@@ -27,6 +28,7 @@ struct OnboardingView: View {
         case .soniox: return settings.apiKey != nil
         case .deepgram: return settings.deepgramApiKey != nil
         case .openai: return settings.openaiApiKey != nil
+        case .openrouter: return settings.openrouterApiKey != nil
         }
     }
 
@@ -38,6 +40,8 @@ struct OnboardingView: View {
             return ("Get key", URL(string: "https://platform.openai.com/api-keys")!)
         case .soniox:
             return ("Get key", URL(string: "https://soniox.com")!)
+        case .openrouter:
+            return ("Get key", URL(string: "https://openrouter.ai/keys")!)
         }
     }
 
@@ -118,8 +122,11 @@ struct OnboardingView: View {
                 isApiKeyFocused = true
             }
         }
-        .onChange(of: settings.sttProvider) { _ in
+        .onChange(of: settings.sttProvider) { provider in
             loadApiKeyForProvider()
+            if provider == .openrouter {
+                openRouterModels.ensureLoaded()
+            }
         }
         .onChange(of: currentStep) { step in
             // Auto-trigger the mic permission prompt when the user reaches
@@ -328,6 +335,8 @@ struct OnboardingView: View {
                             settings.deepgramApiKey = apiKeyInput
                         case .openai:
                             settings.openaiApiKey = apiKeyInput
+                        case .openrouter:
+                            settings.openrouterApiKey = apiKeyInput
                         }
                     }
                     withAnimation { currentStep += 1 }
@@ -373,6 +382,25 @@ struct OnboardingView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+            } else if settings.sttProvider == .openrouter {
+                HStack(spacing: 8) {
+                    Picker("Model", selection: $settings.openrouterModelID) {
+                        ForEach(openRouterModels.pickerModels) { model in
+                            Text(model.name).tag(model.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .disabled(openRouterModels.pickerModels.isEmpty)
+
+                    if openRouterModels.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .onAppear {
+                    openRouterModels.ensureLoaded()
+                }
             }
         }
     }
@@ -433,6 +461,8 @@ struct OnboardingView: View {
             apiKeyInput = settings.deepgramApiKey ?? ""
         case .openai:
             apiKeyInput = settings.openaiApiKey ?? ""
+        case .openrouter:
+            apiKeyInput = settings.openrouterApiKey ?? ""
         }
     }
 

@@ -4,29 +4,44 @@ public enum STTProviderType: String, Codable, CaseIterable {
     case soniox = "soniox"
     case deepgram = "deepgram"
     case openai = "openai"
+    case openrouter = "openrouter"
 
     public var displayName: String {
         switch self {
         case .soniox: return "Soniox"
         case .deepgram: return "Deepgram"
         case .openai: return "OpenAI"
+        case .openrouter: return "OpenRouter"
         }
     }
 
-    /// Model ID sent to the provider API (or selected OpenAI / Soniox model).
+    /// Model ID sent to the provider API (or selected OpenAI / Soniox / OpenRouter model).
     public var modelID: String {
         switch self {
         case .soniox: return SettingsStore.shared.sonioxMode.modelID
         case .deepgram: return "nova-3"
         case .openai: return SettingsStore.shared.openaiModel.rawValue
+        case .openrouter: return SettingsStore.shared.openrouterModelID
         }
     }
 
     /// PCM sample rate expected by the provider.
     public var audioSampleRate: Double {
         switch self {
-        case .soniox, .deepgram: return 16_000
+        case .soniox, .deepgram, .openrouter: return 16_000
         case .openai: return 24_000
+        }
+    }
+
+    /// True when the provider buffers audio and returns text only after stop (no live interim).
+    public var isBatchTranscription: Bool {
+        switch self {
+        case .openrouter:
+            return true
+        case .soniox:
+            return SettingsStore.shared.sonioxMode == .async
+        case .deepgram, .openai:
+            return false
         }
     }
 }

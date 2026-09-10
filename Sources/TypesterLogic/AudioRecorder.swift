@@ -50,7 +50,7 @@ public class AudioRecorder {
     private var engineConfigObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
-    /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram, 24 kHz OpenAI).
+    /// Target PCM sample rate for STT (16 kHz Soniox/Deepgram/OpenRouter, 24 kHz OpenAI).
     public var targetSampleRate: Double = 16_000
 
     // MARK: - Callbacks

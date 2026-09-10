@@ -44,9 +44,12 @@ struct SettingsView: View {
     @State private var sonioxKeyInput: String = ""
     @State private var deepgramKeyInput: String = ""
     @State private var openaiKeyInput: String = ""
+    @State private var openrouterKeyInput: String = ""
     @State private var showSonioxKey = false
     @State private var showDeepgramKey = false
     @State private var showOpenAIKey = false
+    @State private var showOpenRouterKey = false
+    @ObservedObject private var openRouterModels = OpenRouterModelsStore.shared
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var showingAddTerm = false
@@ -84,12 +87,18 @@ struct SettingsView: View {
             if let key = settings.openaiApiKey {
                 openaiKeyInput = key
             }
+            if let key = settings.openrouterApiKey {
+                openrouterKeyInput = key
+            }
             if let pane = ProcessInfo.processInfo.environment["TYPESTER_PANE"],
                let parsed = SettingsPane(rawValue: pane) {
                 selectedSection = parsed
             }
             checkPermissions()
             settings.syncLaunchAtLoginStatus()
+            if settings.sttProvider == .openrouter {
+                openRouterModels.ensureLoaded()
+            }
         }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             checkPermissions()
@@ -277,6 +286,11 @@ struct SettingsView: View {
                         },
                         selection: $settings.sttProvider
                     )
+                    .onChange(of: settings.sttProvider) { provider in
+                        if provider == .openrouter {
+                            openRouterModels.ensureLoaded()
+                        }
+                    }
 
                     modelRow
                 }
@@ -343,6 +357,60 @@ struct SettingsView: View {
                     .font(.mono(11))
                     .foregroundStyle(Codex.textTertiary)
             }
+        case .openrouter:
+            openRouterModelRow
+        }
+    }
+
+    private var openRouterModelRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Picker("Model", selection: $settings.openrouterModelID) {
+                    ForEach(openRouterModels.pickerModels) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .disabled(openRouterModels.pickerModels.isEmpty)
+
+                Button {
+                    openRouterModels.refresh(force: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(openRouterModels.isLoading)
+                .help("Refresh OpenRouter transcription models")
+
+                if openRouterModels.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer(minLength: 0)
+
+                Text(settings.openrouterModelID)
+                    .font(.mono(11))
+                    .foregroundStyle(Codex.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Text("Records locally, then transcribes after you stop (no live text). Models refresh automatically from OpenRouter.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Codex.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let error = openRouterModels.lastError, openRouterModels.models.isEmpty {
+                Text(error)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear {
+            openRouterModels.ensureLoaded()
         }
     }
 
@@ -356,6 +424,8 @@ struct SettingsView: View {
                 return ($deepgramKeyInput, $showDeepgramKey, settings.deepgramApiKey, { settings.deepgramApiKey = $0 }, URL(string: "https://console.deepgram.com")!)
             case .openai:
                 return ($openaiKeyInput, $showOpenAIKey, settings.openaiApiKey, { settings.openaiApiKey = $0 }, URL(string: "https://platform.openai.com/api-keys")!)
+            case .openrouter:
+                return ($openrouterKeyInput, $showOpenRouterKey, settings.openrouterApiKey, { settings.openrouterApiKey = $0 }, URL(string: "https://openrouter.ai/keys")!)
             }
         }()
 
@@ -430,8 +500,8 @@ struct SettingsView: View {
 
             SettingsSection(
                 "Transcription",
-                footer: settings.sttProvider == .soniox && settings.sonioxMode == .async
-                    ? "Paste on pause is unavailable in Soniox Async mode (no live endpoints while recording)."
+                footer: settings.sttProvider.isBatchTranscription
+                    ? "Paste on pause is unavailable for batch providers (no live endpoints while recording)."
                     : "Off (recommended): keep streaming while you speak and paste only when you stop. On: paste each time a short pause is detected."
             ) {
                 SettingsRow(
@@ -443,8 +513,8 @@ struct SettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .tint(Codex.green)
-                        .disabled(settings.sttProvider == .soniox && settings.sonioxMode == .async)
-                        .opacity(settings.sttProvider == .soniox && settings.sonioxMode == .async ? 0.45 : 1)
+                        .disabled(settings.sttProvider.isBatchTranscription)
+                        .opacity(settings.sttProvider.isBatchTranscription ? 0.45 : 1)
                 }
 
                 SettingsRow(
@@ -613,6 +683,8 @@ struct SettingsView: View {
             return "Words are replaced locally before paste; correct terms are also sent to Soniox."
         case .deepgram:
             return "Words are replaced locally before paste. Deepgram does not receive dictionary hints."
+        case .openrouter:
+            return "Words are replaced locally before paste. OpenRouter transcription does not receive dictionary hints."
         }
     }
 
