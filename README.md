@@ -14,9 +14,11 @@ Typester lives in your menu bar and lets you dictate text directly into any appl
 
 Features:
 - **Multiple providers** — Choose Soniox, Deepgram, OpenAI, or OpenRouter for speech recognition
-- **Press-to-speak** — Hold a key to dictate, release to paste (default mode, configurable: Fn, Left/Right ⌘, Left/Right ⌥)
-- **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or custom shortcut)
+- **Press-to-speak** — Hold a key to dictate, release to paste (default mode; pick any side of ⌘ ⌥ ⌃ ⇧ or Fn)
+- **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or record any custom shortcut combo)
+- **Floating pill** — Optional Wispr-style always-on-top pill: click to start/stop dictation, drag it anywhere
 - **Cancel with Esc** — Press Escape while dictating to discard the transcript without pasting
+- **Filler-word cleanup** — Optional removal of hesitation fillers (uh, um, you know, I mean…) before paste
 - **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); OpenRouter uses batch transcription with a live model catalog
 - **OpenAI model picker** — Select `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`
 - **Multilingual** — Soniox/OpenAI: language hints; Deepgram: auto-detects with multilingual model
@@ -30,6 +32,7 @@ Features:
 - **Clipboard keeping** — Optional: keep each transcript on your clipboard so you can ⌘V it again when no text field was focused
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
 - **Launch at login** — Start automatically when you log in
+- **Shotbase-style permission setup** — Onboarding opens System Settings and floats a drag-to-grant Accessibility helper over the list
 
 ## Requirements
 

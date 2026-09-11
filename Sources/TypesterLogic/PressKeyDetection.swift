@@ -11,7 +11,8 @@ public enum PressKeyDetection {
         switch configured {
         case .fn:
             return keyCode == Int64(kVK_Function)
-        case .leftCommand, .rightCommand, .leftOption, .rightOption:
+        case .leftCommand, .rightCommand, .leftOption, .rightOption,
+             .leftControl, .rightControl, .leftShift, .rightShift:
             return true
         }
     }
@@ -33,6 +34,14 @@ public enum PressKeyDetection {
             return flags.rawValue & 0x00000020 != 0
         case .rightOption:
             return flags.rawValue & 0x00000040 != 0
+        case .leftControl:
+            return flags.rawValue & 0x00000001 != 0
+        case .rightControl:
+            return flags.rawValue & 0x00002000 != 0
+        case .leftShift:
+            return flags.rawValue & 0x00000002 != 0
+        case .rightShift:
+            return flags.rawValue & 0x00000004 != 0
         }
     }
 }

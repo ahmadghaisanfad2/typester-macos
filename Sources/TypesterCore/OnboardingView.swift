@@ -195,6 +195,7 @@ struct OnboardingView: View {
             TextPaster.requestAccessibilityPermission()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 TextPaster.openAccessibilitySettings()
+                AccessibilityDragHelper.shared.show()
             }
         }
     }

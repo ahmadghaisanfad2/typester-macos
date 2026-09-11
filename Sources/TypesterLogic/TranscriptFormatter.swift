@@ -2,9 +2,14 @@ import Foundation
 
 /// Light local cleanup for punctuation spacing and sentence capitalization.
 public enum TranscriptFormatter {
-    public static func format(_ text: String) -> String {
+    public static func format(_ text: String, removeFillers: Bool = false) -> String {
         var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return result }
+
+        if removeFillers {
+            result = FillerWordRemover.removeFillers(from: result)
+            guard !result.isEmpty else { return result }
+        }
 
         // Collapse runs of whitespace to a single space
         while result.contains("  ") {

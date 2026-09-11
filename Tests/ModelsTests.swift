@@ -158,7 +158,10 @@ final class ModelsTests: XCTestCase {
 
     func testPressToSpeakKeyAllCases() {
         let allCases = PressToSpeakKey.allCases
-        XCTAssertEqual(allCases.count, 5)
+        // Fn + left/right ⌘ ⌥ ⌃ ⇧
+        XCTAssertEqual(allCases.count, 9)
+        XCTAssertTrue(allCases.contains(.leftControl))
+        XCTAssertTrue(allCases.contains(.rightShift))
     }
 
     // MARK: - STTProviderType tests

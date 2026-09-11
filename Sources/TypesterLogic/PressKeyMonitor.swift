@@ -29,12 +29,7 @@ public class PressKeyMonitor {
     }
 
     private var needsKeyDownMonitoring: Bool {
-        switch SettingsStore.shared.pressToSpeakKey {
-        case .fn:
-            return false
-        case .leftCommand, .rightCommand, .leftOption, .rightOption:
-            return true
-        }
+        SettingsStore.shared.pressToSpeakKey.requiresChordCancellation
     }
 
     public func start() {
