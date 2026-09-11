@@ -520,9 +520,36 @@ struct SettingsView: View {
                 SettingsRow(
                     "Copy transcript to clipboard",
                     help: "Keep each transcript on your clipboard so you can press ⌘V to paste it again — handy when no text field was focused.",
-                    showsDivider: false
+                    showsDivider: true
                 ) {
                     Toggle("", isOn: $settings.copyTranscriptToClipboard)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
+                }
+
+                SettingsRow(
+                    "Remove filler words",
+                    help: "Strip hesitation sounds like “uh”, “um”, “you know” before pasting.",
+                    showsDivider: false
+                ) {
+                    Toggle("", isOn: $settings.removeFillerWords)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
+                }
+            }
+
+            SettingsSection(
+                "Floating pill",
+                footer: "A small always-on-top pill you can click to start or stop dictation — similar to Wispr Flow. Drag it anywhere on screen."
+            ) {
+                SettingsRow(
+                    "Show floating pill",
+                    help: "Keep a clickable pill on screen as an alternative to the hotkey.",
+                    showsDivider: false
+                ) {
+                    Toggle("", isOn: $settings.showFloatingPill)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .tint(Codex.green)
@@ -814,6 +841,7 @@ struct SettingsView: View {
 
                         Button("Open System Settings") {
                             TextPaster.openAccessibilitySettings()
+                            AccessibilityDragHelper.shared.show()
                         }
                         .controlSize(.small)
 

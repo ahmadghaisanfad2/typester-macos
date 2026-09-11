@@ -93,4 +93,51 @@ final class PressKeyDetectionTests: XCTestCase {
             )
         )
     }
+
+    func testLeftControlUsesDeviceDependentBit() {
+        XCTAssertTrue(
+            PressKeyDetection.isKeyDown(
+                configured: .leftControl,
+                keyCode: Int64(kVK_Control),
+                flags: CGEventFlags(rawValue: 0x00000001)
+            )
+        )
+        XCTAssertFalse(
+            PressKeyDetection.isKeyDown(
+                configured: .leftControl,
+                keyCode: Int64(kVK_Control),
+                flags: CGEventFlags(rawValue: 0x00002000) // right control
+            )
+        )
+    }
+
+    func testRightShiftUsesDeviceDependentBit() {
+        XCTAssertTrue(
+            PressKeyDetection.isKeyDown(
+                configured: .rightShift,
+                keyCode: Int64(kVK_RightShift),
+                flags: CGEventFlags(rawValue: 0x00000004)
+            )
+        )
+        XCTAssertFalse(
+            PressKeyDetection.isKeyDown(
+                configured: .rightShift,
+                keyCode: Int64(kVK_RightShift),
+                flags: CGEventFlags(rawValue: 0x00000002) // left shift
+            )
+        )
+    }
+
+    func testAllModifierPressKeysRequireChordCancellation() {
+        for key in PressToSpeakKey.allCases where key != .fn {
+            XCTAssertTrue(key.requiresChordCancellation, "\(key) should cancel chords")
+        }
+        XCTAssertFalse(PressToSpeakKey.fn.requiresChordCancellation)
+    }
+
+    func testAllCasesHaveDisplayNames() {
+        for key in PressToSpeakKey.allCases {
+            XCTAssertFalse(key.displayName.isEmpty, "\(key) missing display name")
+        }
+    }
 }

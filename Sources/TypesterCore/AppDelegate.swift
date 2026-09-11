@@ -104,6 +104,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupAudioPipeline()
         setupPasteSuppression()
         setupAccessibilityTrustMonitoring()
+        setupFloatingPill()
 
         if let latest = historyStore.entries.first(where: { $0.hasText }) {
             lastTranscript = latest.text
@@ -125,6 +126,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self,
             selector: #selector(accessibilityTrustChanged(_:)),
             name: .accessibilityTrustChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(floatingPillVisibilityChanged),
+            name: .floatingPillVisibilityChanged,
             object: nil
         )
 
@@ -393,6 +400,28 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateSTTProvider()
         rebuildMenu()
         updateActivationPolicy()
+        FloatingDictationPill.shared.showIfNeeded()
+    }
+
+    @objc private func floatingPillVisibilityChanged() {
+        FloatingDictationPill.shared.showIfNeeded()
+    }
+
+    // MARK: - Floating pill
+
+    private func setupFloatingPill() {
+        FloatingDictationPill.shared.onToggleDictation = { [weak self] in
+            self?.toggleRecording()
+        }
+        FloatingDictationPill.shared.onCancelDictation = { [weak self] in
+            self?.cancelActiveTranscription()
+        }
+        FloatingDictationPill.shared.showIfNeeded()
+    }
+
+    private func resetFloatingPill() {
+        FloatingDictationPill.shared.setRecording(false)
+        FloatingDictationPill.shared.setProcessing(false)
     }
 
     // MARK: - Accessibility recovery
@@ -456,6 +485,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alreadyDismissedThisSession: PermissionRecovery.recoveryDismissedForSession()
         ) {
             showPermissionRecovery()
+            AccessibilityDragHelper.shared.show()
         }
         return false
     }
@@ -607,6 +637,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.sessionDiscarded = false
                 self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
+                self.resetFloatingPill()
                 self.sttProvider.disconnect()
                 return
             }
@@ -617,6 +648,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.pasteAccumulatedTranscript(saveHistory: true)
             self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
+            self.resetFloatingPill()
             self.sttProvider.disconnect()
         }
 
@@ -632,6 +664,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.statusItem.button?.image = self.normalIcon
                 self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
+                self.resetFloatingPill()
                 self.audioRecorder.stopRecording()
                 self.sttProvider.disconnect()
                 return
@@ -646,6 +679,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.statusItem.button?.image = self.normalIcon
             self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
+            self.resetFloatingPill()
             self.audioRecorder.stopRecording()
             let current = TranscriptPastePayload.resolve(
                 accumulatedText: self.accumulatedText,
@@ -904,6 +938,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.image = normalIcon
         disarmEscapeCancel()
         subtitleOverlay.hide()
+        resetFloatingPill()
 
         let current = currentSessionText()
         let historyText: String
@@ -1332,7 +1367,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let text = raw {
             lastTranscript = text
             let replaced = SettingsStore.shared.applyReplacements(text)
-            let formatted = TranscriptFormatter.format(replaced)
+            let formatted = TranscriptFormatter.format(
+                replaced,
+                removeFillers: SettingsStore.shared.removeFillerWords
+            )
             let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
             textPaster.paste(
                 pasteText,
@@ -1526,7 +1564,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         lastTranscript = text
         let replaced = SettingsStore.shared.applyReplacements(text)
-        let formatted = TranscriptFormatter.format(replaced)
+        let formatted = TranscriptFormatter.format(
+            replaced,
+            removeFillers: SettingsStore.shared.removeFillerWords
+        )
         let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
         textPaster.paste(
             pasteText,
@@ -1830,6 +1871,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appIcon = frontApp?.icon
         sessionAppName = appName
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
+        FloatingDictationPill.shared.setRecording(true, appName: appName)
         armEscapeCancel()
 
         syncAudioSampleRate()
@@ -1858,6 +1900,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Compact spinner while any provider finishes (async upload, OpenAI commit, etc.).
         subtitleOverlay.showProcessing()
+        FloatingDictationPill.shared.setProcessing(true)
 
         if isRecovering {
             recoveryLock.withLock {
@@ -1927,6 +1970,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         audioRecorder.stopRecording()
         disarmEscapeCancel()
         subtitleOverlay.hide()
+        resetFloatingPill()
         sttProvider.disconnect()
     }
 

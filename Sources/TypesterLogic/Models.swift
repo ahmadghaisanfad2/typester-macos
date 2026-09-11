@@ -1,6 +1,6 @@
 import Cocoa
 
-public let appVersion = "1.19.4"
+public let appVersion = "1.20.0"
 
 public enum CorrectionSource: String, Codable, Equatable {
     case taught
@@ -201,7 +201,11 @@ public enum ActivationMode: String, Codable, CaseIterable {
 }
 
 public enum PressToSpeakKey: String, Codable, CaseIterable {
-    case fn, leftCommand, rightCommand, leftOption, rightOption
+    case fn
+    case leftCommand, rightCommand
+    case leftOption, rightOption
+    case leftControl, rightControl
+    case leftShift, rightShift
 
     public var displayName: String {
         switch self {
@@ -210,6 +214,18 @@ public enum PressToSpeakKey: String, Codable, CaseIterable {
         case .rightCommand: return "Right ⌘"
         case .leftOption: return "Left ⌥"
         case .rightOption: return "Right ⌥"
+        case .leftControl: return "Left ⌃"
+        case .rightControl: return "Right ⌃"
+        case .leftShift: return "Left ⇧"
+        case .rightShift: return "Right ⇧"
+        }
+    }
+
+    /// True for modifiers that must not steal ⌘/⌥/⌃/⇧ chords (letter keys while held).
+    public var requiresChordCancellation: Bool {
+        switch self {
+        case .fn: return false
+        default: return true
         }
     }
 }

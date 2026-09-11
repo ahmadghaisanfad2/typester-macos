@@ -55,6 +55,7 @@ struct PermissionRecoveryView: View {
                 HStack(spacing: 8) {
                     Button("Open System Settings") {
                         TextPaster.openAccessibilitySettings()
+                        AccessibilityDragHelper.shared.show()
                         accessibilityGranted = TextPaster.checkAccessibilityPermission()
                     }
                     .controlSize(.small)

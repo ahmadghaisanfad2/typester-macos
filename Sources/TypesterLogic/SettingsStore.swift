@@ -5,6 +5,7 @@ import Security
 public extension Notification.Name {
     static let settingsChanged = Notification.Name("settingsChanged")
     static let automaticDictionaryLearningChanged = Notification.Name("automaticDictionaryLearningChanged")
+    static let floatingPillVisibilityChanged = Notification.Name("floatingPillVisibilityChanged")
 }
 
 public class SettingsStore: ObservableObject {
@@ -178,6 +179,21 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Strip hesitation fillers (uh, um, you know, …) before pasting.
+    @Published public var removeFillerWords: Bool = true {
+        didSet {
+            UserDefaults.standard.set(removeFillerWords, forKey: removeFillerWordsKey)
+        }
+    }
+
+    /// Persistent Wispr-style floating pill that starts/stops dictation on click.
+    @Published public var showFloatingPill: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showFloatingPill, forKey: showFloatingPillKey)
+            NotificationCenter.default.post(name: .floatingPillVisibilityChanged, object: nil)
+        }
+    }
+
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
@@ -199,6 +215,8 @@ public class SettingsStore: ObservableObject {
     private let dictationSoundVolumeKey = "dictationSoundVolume"
     private let pasteOnPauseKey = "pasteOnPause"
     private let copyTranscriptToClipboardKey = "copyTranscriptToClipboard"
+    private let removeFillerWordsKey = "removeFillerWords"
+    private let showFloatingPillKey = "showFloatingPill"
     private let showInDockKey = "showInDock"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
@@ -464,6 +482,12 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: copyTranscriptToClipboardKey) != nil {
             copyTranscriptToClipboard = UserDefaults.standard.bool(forKey: copyTranscriptToClipboardKey)
+        }
+        if UserDefaults.standard.object(forKey: removeFillerWordsKey) != nil {
+            removeFillerWords = UserDefaults.standard.bool(forKey: removeFillerWordsKey)
+        }
+        if UserDefaults.standard.object(forKey: showFloatingPillKey) != nil {
+            showFloatingPill = UserDefaults.standard.bool(forKey: showFloatingPillKey)
         }
         if UserDefaults.standard.object(forKey: showInDockKey) != nil {
             showInDock = UserDefaults.standard.bool(forKey: showInDockKey)
