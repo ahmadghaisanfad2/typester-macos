@@ -3,9 +3,10 @@ import TypesterCore
 
 /// Libraries.dev Voice + Border beam, drawn as a **masked in-capsule background**.
 ///
-/// Recording: multi-lobe colorful bloom from the bottom edge (Voice).
-/// Transcribing: a colorful beam rides the **inner perimeter** of the capsule
-/// (Border beam). No outer bleed — parent clips to the capsule shape.
+/// Recording: full-interior colorful ambient + bottom Voice bloom — no dark
+/// plate left behind labels or the waveform.
+/// Transcribing: colorful Border beam rides the **capsule edges**; interior
+/// stays a soft wash so content is not sitting on black.
 struct VoiceGlowBeamView: View {
     var frame: VoiceGlowFrame
     var palette: VoiceGlowPalette = .colorful
@@ -13,7 +14,7 @@ struct VoiceGlowBeamView: View {
     /// Relative reach into the capsule (0…1 of view height at full voice).
     var reachFraction: CGFloat = 0.72
     /// Border-beam thickness scale when processing.
-    var beamStrength: CGFloat = 0.85
+    var beamStrength: CGFloat = 1.0
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
@@ -26,32 +27,30 @@ struct VoiceGlowBeamView: View {
             let isBeam = frame.beamPhase != nil && !accessibilityReduceMotion
             let phase = CGFloat(frame.beamPhase ?? 0.5)
 
-            let edgeY = size.height
-            let spread = CGFloat(max(0.25, config.spread))
-            let maxReach = size.height * reachFraction * CGFloat(max(0.25, config.reach))
+            // Always paint the interior first so labels/waveform never sit on black.
+            drawFullInteriorAmbient(
+                context: context,
+                size: size,
+                intensity: intensity,
+                level: level,
+                emphasizeBottom: !isBeam
+            )
 
             if isBeam {
-                // Soft interior wash so the capsule still feels alive…
-                drawInteriorWash(
-                    context: context,
-                    size: size,
-                    intensity: intensity * 0.55,
-                    level: max(level, 0.35)
-                )
-                // …plus the Border beam riding the inner edge.
-                drawBorderBeam(
+                drawEdgeBeam(
                     context: context,
                     size: size,
                     phase: Float(phase),
-                    intensity: intensity,
-                    maxReach: maxReach
+                    intensity: intensity
                 )
             } else {
+                let maxReach = size.height * reachFraction * CGFloat(max(0.25, config.reach))
+                let spread = CGFloat(max(0.25, config.spread))
                 let reach = maxReach * (0.28 + 0.72 * level)
                 drawVoiceBloom(
                     context: context,
                     size: size,
-                    edgeY: edgeY,
+                    edgeY: size.height,
                     level: level,
                     intensity: intensity,
                     spread: spread,
@@ -63,7 +62,51 @@ struct VoiceGlowBeamView: View {
         .accessibilityHidden(true)
     }
 
-    // MARK: - Voice bloom (recording)
+    // MARK: - Full interior ambient (kills the black plate look)
+
+    private func drawFullInteriorAmbient(
+        context: GraphicsContext,
+        size: CGSize,
+        intensity: CGFloat,
+        level: CGFloat,
+        emphasizeBottom: Bool
+    ) {
+        let lobes = palette.lobes.isEmpty ? [palette.mid, palette.below, palette.above] : palette.lobes
+        // Strong enough that the content row is on color, not on the dark base.
+        let base = intensity * (0.34 + 0.22 * level)
+
+        // Horizontal multi-lobe wash across the entire capsule.
+        let horizontal = lobes.enumerated().map { index, hex -> Color in
+            let t = lobes.count <= 1 ? 0.5 : CGFloat(index) / CGFloat(lobes.count - 1)
+            let center = 1 - abs(t - 0.5) * 2
+            return Color(hex: hex).opacity(Double(base * (0.55 + 0.45 * center)))
+        }
+        context.fill(
+            Path(CGRect(origin: .zero, size: size)),
+            with: .linearGradient(
+                Gradient(colors: horizontal),
+                startPoint: CGPoint(x: 0, y: size.height * 0.55),
+                endPoint: CGPoint(x: size.width, y: size.height * 0.55)
+            )
+        )
+
+        // Vertical lift — stronger at the bottom when recording (Voice).
+        let liftOpacity = intensity * (emphasizeBottom ? (0.22 + 0.28 * level) : 0.14)
+        context.fill(
+            Path(CGRect(origin: .zero, size: size)),
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: Color(hex: palette.above).opacity(Double(liftOpacity * 0.35)), location: 0),
+                    .init(color: Color(hex: palette.mid).opacity(Double(liftOpacity * 0.7)), location: 0.45),
+                    .init(color: Color(hex: palette.below).opacity(Double(liftOpacity)), location: 1)
+                ]),
+                startPoint: CGPoint(x: size.width / 2, y: 0),
+                endPoint: CGPoint(x: size.width / 2, y: size.height)
+            )
+        )
+    }
+
+    // MARK: - Voice bloom (recording, bottom emphasis)
 
     private func drawVoiceBloom(
         context: GraphicsContext,
@@ -77,29 +120,13 @@ struct VoiceGlowBeamView: View {
         let lobes = palette.lobes.isEmpty ? [palette.mid] : palette.lobes
         let count = lobes.count
 
-        // Broad continuous wash — no hard plateau under the lobes.
-        let washOpacity = intensity * (0.2 + 0.45 * level)
-        let washHeight = max(10, reach * 1.25)
-        context.fill(
-            Path(CGRect(x: 0, y: edgeY - washHeight, width: size.width, height: washHeight)),
-            with: .linearGradient(
-                Gradient(stops: [
-                    .init(color: Color(hex: palette.below).opacity(0), location: 0),
-                    .init(color: Color(hex: palette.mid).opacity(Double(washOpacity * 0.5)), location: 0.4),
-                    .init(color: Color(hex: palette.below).opacity(Double(washOpacity)), location: 1)
-                ]),
-                startPoint: CGPoint(x: size.width / 2, y: edgeY - washHeight),
-                endPoint: CGPoint(x: size.width / 2, y: edgeY)
-            )
-        )
-
         for (index, hex) in lobes.enumerated() {
             let t = count == 1 ? 0.5 : CGFloat(index) / CGFloat(count - 1)
             let centerWeight = 1 - abs(t - 0.5) * 2
             let x = size.width * (0.5 + (t - 0.5) * spread)
             let lobeRadius = reach * (0.55 + 0.55 * centerWeight) * (0.45 + 0.55 * level)
-            let opacity = intensity * (0.32 + 0.55 * centerWeight) * (0.4 + 0.6 * level)
-            let color = Color(hex: hex).opacity(Double(min(0.95, opacity)))
+            let opacity = intensity * (0.28 + 0.45 * centerWeight) * (0.4 + 0.6 * level)
+            let color = Color(hex: hex).opacity(Double(min(0.9, opacity)))
 
             let rect = CGRect(
                 x: x - lobeRadius * 1.25,
@@ -118,7 +145,7 @@ struct VoiceGlowBeamView: View {
             )
         }
 
-        let coreOpacity = intensity * (0.25 + 0.55 * level)
+        let coreOpacity = intensity * (0.22 + 0.45 * level)
         let coreWidth = size.width * min(0.92, spread + 0.2)
         let coreRect = CGRect(
             x: (size.width - coreWidth) / 2,
@@ -130,8 +157,8 @@ struct VoiceGlowBeamView: View {
             Path(ellipseIn: coreRect),
             with: .radialGradient(
                 Gradient(colors: [
-                    Color(hex: palette.core).opacity(Double(min(0.9, coreOpacity))),
-                    Color(hex: palette.above).opacity(Double(coreOpacity * 0.45)),
+                    Color(hex: palette.core).opacity(Double(min(0.85, coreOpacity))),
+                    Color(hex: palette.above).opacity(Double(coreOpacity * 0.4)),
                     Color(hex: palette.core).opacity(0)
                 ]),
                 center: CGPoint(x: coreRect.midX, y: edgeY - 2),
@@ -141,78 +168,76 @@ struct VoiceGlowBeamView: View {
         )
     }
 
-    // MARK: - Border beam (transcribing)
+    // MARK: - Border beam on capsule edges (transcribing)
 
-    private func drawInteriorWash(
-        context: GraphicsContext,
-        size: CGSize,
-        intensity: CGFloat,
-        level: CGFloat
-    ) {
-        let colors = [
-            Color(hex: palette.mid).opacity(Double(intensity * 0.22 * level)),
-            Color(hex: palette.below).opacity(Double(intensity * 0.16 * level)),
-            Color(hex: palette.above).opacity(Double(intensity * 0.10 * level)),
-            .clear
-        ]
-        context.fill(
-            Path(CGRect(origin: .zero, size: size)),
-            with: .radialGradient(
-                Gradient(colors: colors),
-                center: CGPoint(x: size.width * 0.5, y: size.height),
-                startRadius: 0,
-                endRadius: max(size.width, size.height) * 0.85
-            )
-        )
-    }
-
-    private func drawBorderBeam(
+    private func drawEdgeBeam(
         context: GraphicsContext,
         size: CGSize,
         phase: Float,
-        intensity: CGFloat,
-        maxReach: CGFloat
+        intensity: CGFloat
     ) {
         let width = Float(size.width)
         let height = Float(size.height)
-        // Stay clearly inside the rounded ends so the beam is not clipped away.
-        let inset = Float(min(size.height, size.width) * 0.12 + 2)
+        // Ride the true capsule edge (tiny inset so clip does not eat the glow).
+        let inset = Float(1.5)
         let sampler = VoiceBorderBeamSampler(width: width, height: height, inset: inset)
-
-        let trailCount = 16
-        let span: Float = 0.14
-        let samples = sampler.trail(phase: phase, count: trailCount, span: span)
-        let lobes = palette.lobes.isEmpty ? [palette.mid, palette.above, palette.below] : palette.lobes
-        let bloom = CGFloat(max(4, min(size.height * 0.22, maxReach * 0.35))) * CGFloat(max(0.4, beamStrength))
-
-        // Faint full-perimeter rail so the path reads even between pulses.
-        let railOpacity = intensity * 0.18
-        let rail = capsulePath(
-            in: CGRect(x: CGFloat(inset), y: CGFloat(inset),
-                       width: CGFloat(sampler.innerWidth), height: CGFloat(sampler.innerHeight))
+        let edgeRect = CGRect(
+            x: CGFloat(inset),
+            y: CGFloat(inset),
+            width: CGFloat(max(1, sampler.innerWidth)),
+            height: CGFloat(max(1, sampler.innerHeight))
         )
+        let path = Path(roundedRect: edgeRect, cornerRadius: CGFloat(sampler.radius), style: .continuous)
+
+        let lobes = palette.lobes.isEmpty ? [palette.mid, palette.above, palette.below, palette.core] : palette.lobes
+        let railAlpha = intensity * 0.55 * CGFloat(max(0.5, beamStrength))
+
+        // Continuous colorful rail along the entire edge.
         context.stroke(
-            rail,
-            with: .color(Color(hex: palette.mid).opacity(Double(railOpacity))),
-            style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
+            path,
+            with: .linearGradient(
+                Gradient(colors: lobes.map {
+                    Color(hex: $0).opacity(Double(railAlpha))
+                }),
+                startPoint: CGPoint(x: edgeRect.minX, y: edgeRect.midY),
+                endPoint: CGPoint(x: edgeRect.maxX, y: edgeRect.midY)
+            ),
+            style: StrokeStyle(lineWidth: 2.4, lineCap: .round)
         )
+
+        // Soft outer bloom hugging the edge (reads as glow on the rim, not inside).
+        context.stroke(
+            path,
+            with: .linearGradient(
+                Gradient(colors: lobes.map {
+                    Color(hex: $0).opacity(Double(intensity * 0.22))
+                }),
+                startPoint: CGPoint(x: edgeRect.minX, y: edgeRect.midY),
+                endPoint: CGPoint(x: edgeRect.maxX, y: edgeRect.midY)
+            ),
+            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+        )
+
+        // Traveling head + trail along the edge path.
+        let trailCount = 18
+        let span: Float = 0.16
+        let samples = sampler.trail(phase: phase, count: trailCount, span: span)
+        let bloom = max(5, size.height * 0.2) * CGFloat(max(0.5, beamStrength))
 
         for sample in samples {
             let u = CGFloat(sample.u)
             let colorHex = lobes[min(lobes.count - 1, Int(u * CGFloat(lobes.count - 1) + 0.5))]
-            // Head is brighter; trail fades.
-            let opacity = intensity * Double(0.25 + 0.7 * pow(Double(u), 1.2)) * Double(beamStrength)
-            let radius = bloom * (0.45 + 0.55 * u)
+            let opacity = intensity * Double(0.3 + 0.65 * pow(Double(u), 1.15)) * Double(beamStrength)
+            let radius = bloom * (0.4 + 0.6 * u)
             let color = Color(hex: colorHex).opacity(min(0.95, opacity))
             let center = CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y))
-            let rect = CGRect(
-                x: center.x - radius,
-                y: center.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            )
             context.fill(
-                Path(ellipseIn: rect),
+                Path(ellipseIn: CGRect(
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )),
                 with: .radialGradient(
                     Gradient(colors: [color, color.opacity(0)]),
                     center: center,
@@ -222,10 +247,9 @@ struct VoiceGlowBeamView: View {
             )
         }
 
-        // Bright head core.
         if let head = samples.last {
             let headColor = Color(hex: palette.core).opacity(Double(min(1, intensity * beamStrength)))
-            let r = bloom * 0.35
+            let r = bloom * 0.4
             let center = CGPoint(x: CGFloat(head.x), y: CGFloat(head.y))
             context.fill(
                 Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)),
@@ -237,11 +261,6 @@ struct VoiceGlowBeamView: View {
                 )
             )
         }
-    }
-
-    private func capsulePath(in rect: CGRect) -> Path {
-        let radius = min(rect.width, rect.height) / 2
-        return Path(roundedRect: rect, cornerRadius: radius, style: .continuous)
     }
 }
 
@@ -257,10 +276,10 @@ extension VoiceGlowBeamView {
     ) -> some View {
         var adjusted = frame
         if reduceMotion, frame.beamPhase != nil {
-            // No travel — steady in-capsule energy only.
+            // Steady edge energy, no travel.
             adjusted.beamPhase = nil
             adjusted.level = max(adjusted.level, VoiceGlowConfig.default.processingLevel)
-            adjusted.intensity = max(adjusted.intensity, 0.4)
+            adjusted.intensity = max(adjusted.intensity, 0.45)
         }
         return VoiceGlowBeamView(
             frame: adjusted,
