@@ -19,6 +19,8 @@ class SubtitleViewModel: ObservableObject {
     /// Latest per-bar spectral targets (0...1). WaveformIcon springs toward
     /// these at display refresh, so the box is not @Published (no 60 Hz storm).
     fileprivate let spectrumTargets = SpectrumTargetBox(count: SubtitleViewModel.barCount)
+    /// Voice-glow mic level + processing flags; sampled on TimelineView.
+    let voiceGlow = VoiceGlowTargetBox()
     fileprivate static let barCount = 9
     /// When false, hide live transcript text; app name and waveform still show.
     @Published var showStreamPreview: Bool = true
@@ -56,6 +58,8 @@ class SubtitleViewModel: ObservableObject {
         targetAppName = appName
         targetAppIcon = appIcon
         spectrumTargets.reset()
+        voiceGlow.reset()
+        voiceGlow.setActive(true)
         showStreamPreview = SettingsStore.shared.showStreamPreview
         isActive = true
         presentationPhase = .presenting
@@ -69,6 +73,7 @@ class SubtitleViewModel: ObservableObject {
         guard presentationPhase != .hidden else { return }
         isActive = false
         isHovering = false
+        voiceGlow.setActive(false)
         presentationPhase = .dismissing
     }
 
@@ -83,6 +88,7 @@ class SubtitleViewModel: ObservableObject {
         targetAppName = ""
         targetAppIcon = nil
         spectrumTargets.reset()
+        voiceGlow.reset()
     }
 
     func updateFinal(_ text: String) {
@@ -101,10 +107,15 @@ class SubtitleViewModel: ObservableObject {
         isProcessing = true
         processingLabel = label
         interimText = ""
+        voiceGlow.setProcessing(true)
+        voiceGlow.setActive(true)
     }
 
     func clearProcessing() {
         isProcessing = false
+        voiceGlow.setProcessing(false)
+        // Caption stays visible briefly after processing; keep glow until hide.
+        voiceGlow.setActive(isActive)
     }
 
     func clearText() {
@@ -115,6 +126,11 @@ class SubtitleViewModel: ObservableObject {
     /// Per-band mic levels from the recorder's FFT; main thread, ~60 Hz.
     func updateSpectrum(_ bands: [Float]) {
         spectrumTargets.update(bands)
+    }
+
+    /// Overall mic level 0…1 for the Voice glow; main thread, ~60 Hz.
+    func updateLevel(_ level: Float) {
+        voiceGlow.update(level: level)
     }
 }
 
@@ -286,14 +302,18 @@ struct SubtitleView: View {
     var body: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
         // fade; the capsule is drawn inset by the same margins as this padding.
+        // Bottom pad is slightly larger so the Voice glow can bloom under the edge.
         pillContent
             .padding(.horizontal, 44)
             .padding(.top, 36)
-            .padding(.bottom, 44)
+            .padding(.bottom, 52)
+            .background(alignment: .bottom) {
+                voiceGlowLayer
+            }
             .background(
                 SoftShadowPillBackground(
                     cornerRadius: 20,
-                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 52, right: 44)
                 )
             )
             .fixedSize()
@@ -301,6 +321,22 @@ struct SubtitleView: View {
             .scaleEffect(presentationScale, anchor: .bottom)
             .offset(y: presentationOffset)
             .animation(presentationAnimation, value: viewModel.presentationPhase)
+    }
+
+    @ViewBuilder
+    private var voiceGlowLayer: some View {
+        if viewModel.isActive {
+            TimelineView(.animation(paused: !viewModel.isActive)) { context in
+                let now = context.date.timeIntervalSinceReferenceDate
+                let frame = viewModel.voiceGlow.frame(at: now)
+                VoiceGlowBeamView.capsuleOverlay(
+                    frame: frame,
+                    palette: .colorful,
+                    reduceMotion: accessibilityReduceMotion
+                )
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     private var presentationScale: CGFloat {
@@ -555,6 +591,17 @@ class SubtitleOverlay {
         } else {
             DispatchQueue.main.async {
                 self.viewModel.updateSpectrum(bands)
+            }
+        }
+    }
+
+    /// Overall mic level 0…1 for the Voice glow; any thread, coalesced to main.
+    func updateLevel(_ level: Float) {
+        if Thread.isMainThread {
+            viewModel.updateLevel(level)
+        } else {
+            DispatchQueue.main.async {
+                self.viewModel.updateLevel(level)
             }
         }
     }

@@ -6,6 +6,7 @@ import TypesterCore
 ///
 /// Click to start dictation; click again to stop. Draggable around the screen,
 /// follows the active Space, and reflects recording / processing state.
+/// While dictating, a Libraries.dev Voice–style colorful glow rides the bottom edge.
 final class FloatingDictationPill {
     static let shared = FloatingDictationPill()
 
@@ -41,6 +42,11 @@ final class FloatingDictationPill {
             )
             let hosting = NSHostingView(rootView: root)
             self.hosting = hosting
+
+            // Glow bleed is intentionally drawn outside the capsule bounds.
+            hosting.wantsLayer = true
+            hosting.layer?.masksToBounds = false
+            hosting.clipsToBounds = false
 
             let window: NSWindow
             if let existing = self.window {
@@ -81,6 +87,7 @@ final class FloatingDictationPill {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
             self.isVisible = false
+            self.viewModel.voiceGlow.reset()
             self.spaceObserver.stop()
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.16
@@ -93,19 +100,48 @@ final class FloatingDictationPill {
 
     func setRecording(_ recording: Bool, appName: String = "") {
         DispatchQueue.main.async { [weak self] in
-            self?.viewModel.isRecording = recording
-            self?.viewModel.targetAppName = recording ? appName : ""
-            self?.viewModel.isProcessing = false
+            guard let self else { return }
+            self.viewModel.isRecording = recording
+            self.viewModel.targetAppName = recording ? appName : ""
+            self.viewModel.isProcessing = false
+            self.viewModel.voiceGlow.setProcessing(false)
+            self.viewModel.voiceGlow.setActive(recording)
+            self.relayoutForGlowHeightChange()
         }
     }
 
     func setProcessing(_ processing: Bool) {
         DispatchQueue.main.async { [weak self] in
-            self?.viewModel.isProcessing = processing
+            guard let self else { return }
+            self.viewModel.isProcessing = processing
             if processing {
-                self?.viewModel.isRecording = false
+                self.viewModel.isRecording = false
+            }
+            self.viewModel.voiceGlow.setProcessing(processing)
+            // Keep glow alive through the transcribe beam; clear when fully idle.
+            self.viewModel.voiceGlow.setActive(processing || self.viewModel.isRecording)
+            self.relayoutForGlowHeightChange()
+        }
+    }
+
+    /// Normalized mic level 0…1 from `AudioRecorder.onAudioLevel` (main thread).
+    func setLevel(_ level: Float) {
+        if Thread.isMainThread {
+            viewModel.voiceGlow.update(level: level)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.viewModel.voiceGlow.update(level: level)
             }
         }
+    }
+
+    /// Borderless pill windows are not content-sized. Recording/processing
+    /// reserve extra bottom height for the Voice glow — re-measure and setFrame
+    /// or the window-server clips the bloom.
+    private func relayoutForGlowHeightChange() {
+        guard isVisible, let window, let hosting else { return }
+        hosting.layoutSubtreeIfNeeded()
+        layout(window: window, hosting: hosting)
     }
 
     private func layout(window: NSWindow, hosting: NSHostingView<FloatingDictationPillView>) {
@@ -146,6 +182,8 @@ final class FloatingPillViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var targetAppName = ""
     @Published var isHovering = false
+    /// Voice-glow mic level + state; sampled on TimelineView (not @Published).
+    let voiceGlow = VoiceGlowTargetBox()
 }
 
 // MARK: - Window that lets SwiftUI content handle clicks while remaining movable
@@ -161,8 +199,42 @@ struct FloatingDictationPillView: View {
     @ObservedObject var model: FloatingPillViewModel
     let onToggle: () -> Void
     let onCancel: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
+        VStack(spacing: 0) {
+            pillBody
+            // Reserve a few points so the Voice glow is not clipped by the window.
+            Color.clear.frame(height: model.isRecording || model.isProcessing ? 8 : 0)
+        }
+        .background(alignment: .bottom) {
+            if model.isRecording || model.isProcessing {
+                voiceGlowLayer
+            }
+        }
+        .onHover { hovering in
+            model.isHovering = hovering
+        }
+        .scaleEffect(model.isHovering ? 1.04 : 1.0)
+        .animation(.easeOut(duration: 0.12), value: model.isHovering)
+        .onTapGesture {
+            onToggle()
+        }
+        .contextMenu {
+            if model.isRecording {
+                Button("Cancel Dictation") {
+                    onCancel()
+                }
+            }
+            Button("Hide Pill") {
+                SettingsStore.shared.showFloatingPill = false
+            }
+        }
+        .help(model.isRecording ? "Click to stop dictation" : "Click to start dictation")
+        .fixedSize()
+    }
+
+    private var pillBody: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(model.isRecording ? Color(hex: 0xE5484D) : Codex.green)
@@ -204,26 +276,21 @@ struct FloatingDictationPillView: View {
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
                 .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
         )
+        .padding(.bottom, 4)
         .contentShape(Capsule())
-        .onHover { hovering in
-            model.isHovering = hovering
+    }
+
+    @ViewBuilder
+    private var voiceGlowLayer: some View {
+        TimelineView(.animation(paused: !(model.isRecording || model.isProcessing))) { context in
+            let now = context.date.timeIntervalSinceReferenceDate
+            let frame = model.voiceGlow.frame(at: now)
+            VoiceGlowBeamView.capsuleOverlay(
+                frame: frame,
+                palette: .colorful,
+                reduceMotion: accessibilityReduceMotion
+            )
         }
-        .scaleEffect(model.isHovering ? 1.04 : 1.0)
-        .animation(.easeOut(duration: 0.12), value: model.isHovering)
-        .onTapGesture {
-            onToggle()
-        }
-        .contextMenu {
-            if model.isRecording {
-                Button("Cancel Dictation") {
-                    onCancel()
-                }
-            }
-            Button("Hide Pill") {
-                SettingsStore.shared.showFloatingPill = false
-            }
-        }
-        .help(model.isRecording ? "Click to stop dictation" : "Click to start dictation")
-        .fixedSize()
+        .allowsHitTesting(false)
     }
 }
