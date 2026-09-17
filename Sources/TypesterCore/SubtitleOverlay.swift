@@ -248,19 +248,14 @@ struct WaveformIcon: View {
                 )
             }
 
-            // Bloom pass: one shared blur whose opacity tracks overall energy.
-            var glow = context
-            glow.addFilter(.blur(radius: 3.5))
-            glow.opacity = 0.10 + 0.34 * min(1, levels.reduce(0, +) / CGFloat(levels.count))
-            glow.fill(bars, with: .color(.white))
-
-            // Crisp bars with a soft top-biased gradient.
+            // Bars only — no dim plate / wash behind them, so the Voice glow
+            // reads as continuous under the waveform.
             context.fill(
                 bars,
                 with: .linearGradient(
                     Gradient(colors: [
                         Color.white.opacity(0.98),
-                        Color.white.opacity(0.70)
+                        Color.white.opacity(0.72)
                     ]),
                     startPoint: CGPoint(x: 0, y: 0),
                     endPoint: CGPoint(x: 0, y: size.height)
@@ -304,7 +299,7 @@ struct SubtitleView: View {
         // fade; the capsule is drawn inset by the same margins as this padding.
         // Voice glow is a masked in-capsule background — not an outer bloom.
         pillContent
-            .background(alignment: .bottom) {
+            .background {
                 voiceGlowLayer
             }
             .padding(.horizontal, 44)
@@ -313,7 +308,10 @@ struct SubtitleView: View {
             .background(
                 SoftShadowPillBackground(
                     cornerRadius: 20,
-                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44),
+                    // Flat dark plate while dictating so the in-capsule glow
+                    // (and border beam) is continuous — no glass rim cut.
+                    glowFill: viewModel.isActive
                 )
             )
             .fixedSize()
@@ -336,8 +334,8 @@ struct SubtitleView: View {
                     reduceMotion: accessibilityReduceMotion
                 )
             }
-            // Match SoftShadowPillBackground's inset capsule so glow cannot
-            // spill into the outer shadow margin.
+            // Match SoftShadowPillBackground's inset capsule so the border beam
+            // rides the true inner edge and glow cannot spill into the shadow margin.
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .blendMode(.plusLighter)
             .allowsHitTesting(false)

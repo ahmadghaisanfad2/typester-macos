@@ -262,10 +262,13 @@ struct FloatingDictationPillView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background {
-            // Dark capsule fill + Voice glow as an in-capsule animated background.
+            // Dark capsule fill + Voice glow / border beam as in-capsule background.
+            // No hairline stroke while active — it used to cut the glow.
             ZStack {
                 Capsule(style: .continuous)
-                    .fill(Color.black.opacity(0.84))
+                    .fill(model.isRecording || model.isProcessing
+                          ? Color(hex: 0x0A0B0E)
+                          : Color.black.opacity(0.84))
 
                 if model.isRecording || model.isProcessing {
                     voiceGlowLayer
@@ -273,7 +276,12 @@ struct FloatingDictationPillView: View {
             }
         }
         .clipShape(Capsule(style: .continuous))
-        .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+        .overlay {
+            if !(model.isRecording || model.isProcessing) {
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+            }
+        }
         .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
         .contentShape(Capsule())
     }

@@ -160,6 +160,81 @@ public final class VoiceGlowDriver {
     }
 }
 
+/// Samples a Libraries.dev–style border beam along a capsule/stadium path.
+///
+/// Path runs clockwise from the top-left of the straight top edge:
+/// top → right cap → bottom (right-to-left) → left cap.
+public struct VoiceBorderBeamSampler: Equatable, Sendable {
+    public var width: Float
+    public var height: Float
+    /// Inset from the outer bounds so the beam rides *inside* the capsule.
+    public var inset: Float
+
+    public init(width: Float, height: Float, inset: Float = 2.5) {
+        self.width = width
+        self.height = height
+        self.inset = inset
+    }
+
+    public var innerWidth: Float { max(0, width - 2 * inset) }
+    public var innerHeight: Float { max(0, height - 2 * inset) }
+    public var radius: Float { min(innerWidth, innerHeight) / 2 }
+
+    public var pathLength: Float {
+        let straight = max(0, innerWidth - 2 * radius)
+        return 2 * straight + 2 * .pi * radius
+    }
+
+    /// Point on the inner stadium path for `phase` in 0…1 (wraps).
+    public func point(at phase: Float) -> (x: Float, y: Float) {
+        let w = innerWidth
+        let h = innerHeight
+        let r = max(0.5, radius)
+        let straight = max(0, w - 2 * r)
+        let arc = Float.pi * r
+        let total = max(0.001, 2 * straight + 2 * arc)
+        var s = (phase - floor(phase)) * total
+
+        // Origin of the inner rect in parent coordinates.
+        let ox = inset
+        let oy = inset
+
+        // Top edge, left → right.
+        if s <= straight {
+            return (ox + r + s, oy)
+        }
+        s -= straight
+
+        // Right cap: top-right → bottom-right.
+        if s <= arc {
+            let angle = s / r
+            return (ox + r + straight + r * sin(angle), oy + r - r * cos(angle))
+        }
+        s -= arc
+
+        // Bottom edge, right → left.
+        if s <= straight {
+            return (ox + r + straight - s, oy + h)
+        }
+        s -= straight
+
+        // Left cap: bottom-left → top-left.
+        let angle = s / r
+        return (ox + r - r * sin(angle), oy + r + r * cos(angle))
+    }
+
+    /// A short trail of samples for `phase`, newest last. `span` is path-normalized.
+    public func trail(phase: Float, count: Int, span: Float) -> [(x: Float, y: Float, u: Float)] {
+        let n = max(1, count)
+        return (0..<n).map { i in
+            let u = Float(i) / Float(n - 1 == 0 ? 1 : n - 1)
+            let t = phase - span * (1 - u)
+            let p = point(at: t)
+            return (p.x, p.y, u)
+        }
+    }
+}
+
 /// Main-thread holder for the newest mic level + overlay activity flags.
 ///
 /// Mirrors `SpectrumTargetBox`: writes are cheap; UI samples on TimelineView
