@@ -20,14 +20,25 @@ struct VoiceGlowBeamView: View {
 
     var body: some View {
         Canvas { context, size in
-            guard frame.intensity > 0.01, size.width > 4, size.height > 4 else { return }
+            guard size.width > 4, size.height > 4 else { return }
+
+            // Opaque capsule body first — this IS the pill interior whenever
+            // the glow layer is mounted (recording / transcribing). There is
+            // no SoftShadow plate behind the waveform or app name.
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .color(Color(hex: 0x0B0C10))
+            )
+
+            guard frame.intensity > 0.01 else { return }
 
             let intensity = CGFloat(min(1, frame.intensity))
             let level = CGFloat(min(1, frame.level))
             let isBeam = frame.beamPhase != nil && !accessibilityReduceMotion
             let phase = CGFloat(frame.beamPhase ?? 0.5)
 
-            // Always paint the interior first so labels/waveform never sit on black.
+            // Colorful ambient across the entire interior so content never
+            // appears to sit on a separate thin black layer.
             drawFullInteriorAmbient(
                 context: context,
                 size: size,
@@ -73,7 +84,7 @@ struct VoiceGlowBeamView: View {
     ) {
         let lobes = palette.lobes.isEmpty ? [palette.mid, palette.below, palette.above] : palette.lobes
         // Strong enough that the content row is on color, not on the dark base.
-        let base = intensity * (0.34 + 0.22 * level)
+        let base = intensity * (0.48 + 0.28 * level)
 
         // Horizontal multi-lobe wash across the entire capsule.
         let horizontal = lobes.enumerated().map { index, hex -> Color in

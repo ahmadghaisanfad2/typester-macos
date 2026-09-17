@@ -71,14 +71,8 @@ final class SoftShadowPillNSView: NSView {
 
         // Interior fill
         if glowFill {
-            // No graphite plate / glass rim behind the waveform or app name.
-            // Shadows only — Voice glow + edge beam provide the capsule interior.
-            context.saveGState()
-            context.addPath(path)
-            context.clip()
-            context.setFillColor(NSColor(srgbRed: 0.03, green: 0.032, blue: 0.04, alpha: 0.92).cgColor)
-            context.fill(pill)
-            context.restoreGState()
+            // Shadows only. The Voice glow canvas IS the capsule interior —
+            // no separate dark/glass plate behind the app name or waveform.
         } else {
             // Cool graphite glass fill — a touch of blue so it reads as hardware,
             // not flat black, and still sits quietly over any app.

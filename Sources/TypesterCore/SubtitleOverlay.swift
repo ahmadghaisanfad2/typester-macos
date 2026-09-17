@@ -335,9 +335,9 @@ struct SubtitleView: View {
                 )
             }
             // Match SoftShadowPillBackground's inset capsule so the border beam
-            // rides the true inner edge and glow cannot spill into the shadow margin.
+            // rides the true inner edge. Normal blending — glow paints the
+            // capsule body; no additive plate under the waveform/name.
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .blendMode(.plusLighter)
             .allowsHitTesting(false)
         }
     }
