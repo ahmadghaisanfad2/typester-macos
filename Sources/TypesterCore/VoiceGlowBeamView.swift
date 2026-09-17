@@ -1,19 +1,17 @@
 import SwiftUI
 import TypesterCore
 
-/// Libraries.dev Voice-style bottom-edge glow for Typester overlays.
+/// Libraries.dev Voice-style glow used as a **masked in-capsule background**.
 ///
-/// Drawn as a non-interactive Canvas above the capsule: multi-lobe colorful
-/// bloom that rises with voice energy; when `frame.beamPhase` is set, a
-/// concentrated core travels left → right along the bottom edge.
+/// Multi-lobe colorful bloom rises from the bottom edge inside the pill shape;
+/// when `frame.beamPhase` is set, a concentrated core travels left → right.
+/// Parent views clip this layer to the capsule — it must not draw outside.
 struct VoiceGlowBeamView: View {
     var frame: VoiceGlowFrame
     var palette: VoiceGlowPalette = .colorful
     var config: VoiceGlowConfig = .default
-    /// Capsule corner radius used to tuck lobes under the bottom edge.
-    var cornerRadius: CGFloat = 14
-    /// Extra visual height above the bottom edge for bloom reach.
-    var bloomHeight: CGFloat = 28
+    /// Relative reach into the capsule (0…1 of view height at full voice).
+    var reachFraction: CGFloat = 0.72
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
@@ -26,10 +24,11 @@ struct VoiceGlowBeamView: View {
             let isBeam = frame.beamPhase != nil && !accessibilityReduceMotion
             let phase = CGFloat(frame.beamPhase ?? 0.5)
 
-            // Bottom edge sits near the lower third so glow hugs the capsule.
-            let edgeY = size.height * 0.72
-            let spread = CGFloat(max(0.15, config.spread))
-            let reach = CGFloat(max(0.2, config.reach)) * bloomHeight * (0.35 + 0.65 * level)
+            // Glow is anchored to the true bottom of the clipped capsule.
+            let edgeY = size.height
+            let spread = CGFloat(max(0.25, config.spread))
+            let maxReach = size.height * reachFraction * CGFloat(max(0.25, config.reach))
+            let reach = maxReach * (0.28 + 0.72 * level)
 
             if isBeam {
                 drawTravelingBeam(
@@ -38,7 +37,7 @@ struct VoiceGlowBeamView: View {
                     phase: phase,
                     edgeY: edgeY,
                     intensity: intensity,
-                    reach: reach
+                    reach: max(maxReach * 0.55, reach)
                 )
             } else {
                 drawVoiceBloom(
@@ -68,70 +67,68 @@ struct VoiceGlowBeamView: View {
         let lobes = palette.lobes.isEmpty ? [palette.mid] : palette.lobes
         let count = lobes.count
 
+        // Broad warm wash first so the bottom reads as lit from within.
+        let washOpacity = intensity * (0.18 + 0.42 * level)
+        let washHeight = max(8, reach * 1.15)
+        context.fill(
+            Path(CGRect(x: 0, y: edgeY - washHeight, width: size.width, height: washHeight)),
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: Color(hex: palette.below).opacity(0), location: 0),
+                    .init(color: Color(hex: palette.mid).opacity(Double(washOpacity * 0.55)), location: 0.45),
+                    .init(color: Color(hex: palette.below).opacity(Double(washOpacity)), location: 1)
+                ]),
+                startPoint: CGPoint(x: size.width / 2, y: edgeY - washHeight),
+                endPoint: CGPoint(x: size.width / 2, y: edgeY)
+            )
+        )
+
         for (index, hex) in lobes.enumerated() {
             let t = count == 1 ? 0.5 : CGFloat(index) / CGFloat(count - 1)
-            // Center-weighted: middle lobes sit slightly higher / brighter.
             let centerWeight = 1 - abs(t - 0.5) * 2
             let x = size.width * (0.5 + (t - 0.5) * spread)
-            let lobeRadius = reach * (0.55 + 0.45 * centerWeight) * (0.5 + 0.5 * level)
-            let opacity = intensity * (0.28 + 0.55 * centerWeight) * (0.45 + 0.55 * level)
-            let color = Color(hex: hex).opacity(Double(min(1, opacity)))
+            let lobeRadius = reach * (0.55 + 0.55 * centerWeight) * (0.45 + 0.55 * level)
+            let opacity = intensity * (0.32 + 0.55 * centerWeight) * (0.4 + 0.6 * level)
+            let color = Color(hex: hex).opacity(Double(min(0.95, opacity)))
 
+            // Ellipse centered on the bottom edge so the upper half blooms inward.
             let rect = CGRect(
-                x: x - lobeRadius * 1.35,
-                y: edgeY - lobeRadius,
-                width: lobeRadius * 2.7,
-                height: lobeRadius * 2.2
+                x: x - lobeRadius * 1.25,
+                y: edgeY - lobeRadius * 1.1,
+                width: lobeRadius * 2.5,
+                height: lobeRadius * 1.6
             )
             context.fill(
                 Path(ellipseIn: rect),
                 with: .radialGradient(
                     Gradient(colors: [color, color.opacity(0)]),
-                    center: CGPoint(x: x, y: edgeY),
+                    center: CGPoint(x: x, y: edgeY - lobeRadius * 0.15),
                     startRadius: 0,
-                    endRadius: max(1, lobeRadius * 1.2)
+                    endRadius: max(1, lobeRadius * 1.15)
                 )
             )
         }
 
-        // Core highlight band along the bottom edge.
-        let coreOpacity = intensity * (0.2 + 0.5 * level)
-        let coreHeight = max(3, reach * 0.35)
+        // Bright core arc hugging the bottom edge inside the mask.
+        let coreOpacity = intensity * (0.25 + 0.55 * level)
+        let coreWidth = size.width * min(0.92, spread + 0.2)
         let coreRect = CGRect(
-            x: size.width * 0.5 - size.width * spread * 0.45,
-            y: edgeY - coreHeight * 0.3,
-            width: size.width * spread * 0.9,
-            height: coreHeight
+            x: (size.width - coreWidth) / 2,
+            y: edgeY - reach * 0.42,
+            width: coreWidth,
+            height: reach * 0.55
         )
         context.fill(
             Path(ellipseIn: coreRect),
             with: .radialGradient(
                 Gradient(colors: [
-                    Color(hex: palette.core).opacity(Double(min(1, coreOpacity))),
-                    Color(hex: palette.mid).opacity(Double(coreOpacity * 0.35)),
+                    Color(hex: palette.core).opacity(Double(min(0.9, coreOpacity))),
+                    Color(hex: palette.above).opacity(Double(coreOpacity * 0.45)),
                     Color(hex: palette.core).opacity(0)
                 ]),
-                center: CGPoint(x: coreRect.midX, y: coreRect.midY),
+                center: CGPoint(x: coreRect.midX, y: edgeY - 2),
                 startRadius: 0,
-                endRadius: max(1, coreRect.width * 0.55)
-            )
-        )
-
-        // Soft below-edge wash so the glow reads as attached, not floating.
-        let wash = Color(hex: palette.below).opacity(Double(intensity * 0.22 * (0.4 + 0.6 * level)))
-        let washRect = CGRect(
-            x: size.width * (0.5 - spread * 0.55),
-            y: edgeY - 2,
-            width: size.width * spread * 1.1,
-            height: max(6, bloomHeight * 0.45)
-        )
-        context.fill(
-            Path(ellipseIn: washRect),
-            with: .radialGradient(
-                Gradient(colors: [wash, wash.opacity(0)]),
-                center: CGPoint(x: washRect.midX, y: washRect.minY),
-                startRadius: 0,
-                endRadius: max(1, washRect.height)
+                endRadius: max(1, coreRect.width * 0.5)
             )
         )
     }
@@ -144,38 +141,53 @@ struct VoiceGlowBeamView: View {
         intensity: CGFloat,
         reach: CGFloat
     ) {
-        let x = size.width * (0.08 + 0.84 * phase)
+        // Keep the traveling core inside the rounded ends.
+        let x = size.width * (0.18 + 0.64 * phase)
         let bandColors = [palette.above, palette.mid, palette.below, palette.core]
 
+        // Soft floor so the beam still sits on a lit bottom, not a void.
+        let floorOpacity = intensity * 0.35
+        let floorHeight = max(6, reach * 0.55)
+        context.fill(
+            Path(CGRect(x: 0, y: edgeY - floorHeight, width: size.width, height: floorHeight)),
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: Color(hex: palette.mid).opacity(0), location: 0),
+                    .init(color: Color(hex: palette.below).opacity(Double(floorOpacity)), location: 1)
+                ]),
+                startPoint: CGPoint(x: size.width / 2, y: edgeY - floorHeight),
+                endPoint: CGPoint(x: size.width / 2, y: edgeY)
+            )
+        )
+
         for (offset, hex) in bandColors.enumerated() {
-            let scale = 1 - CGFloat(offset) * 0.18
-            let radius = max(6, reach * 1.35 * scale)
-            let opacity = intensity * (0.55 - CGFloat(offset) * 0.08)
+            let scale = 1 - CGFloat(offset) * 0.16
+            let radius = max(8, reach * 0.95 * scale)
+            let opacity = intensity * (0.5 - CGFloat(offset) * 0.07)
             let color = Color(hex: hex).opacity(Double(max(0, opacity)))
             let rect = CGRect(
                 x: x - radius,
-                y: edgeY - radius * 0.55,
+                y: edgeY - radius * 0.85,
                 width: radius * 2,
-                height: radius * 1.3
+                height: radius * 1.2
             )
             context.fill(
                 Path(ellipseIn: rect),
                 with: .radialGradient(
                     Gradient(colors: [color, color.opacity(0)]),
-                    center: CGPoint(x: x, y: edgeY),
+                    center: CGPoint(x: x, y: edgeY - radius * 0.1),
                     startRadius: 0,
                     endRadius: max(1, radius)
                 )
             )
         }
 
-        // Thin bright core streak.
         let coreOpacity = min(1, intensity * 0.95)
         let coreRect = CGRect(
-            x: x - size.width * 0.06,
-            y: edgeY - 2,
-            width: size.width * 0.12,
-            height: 5
+            x: x - size.width * 0.07,
+            y: edgeY - 3,
+            width: size.width * 0.14,
+            height: 6
         )
         context.fill(
             Path(ellipseIn: coreRect),
@@ -184,13 +196,14 @@ struct VoiceGlowBeamView: View {
     }
 }
 
-// MARK: - Shared overlay helper
+// MARK: - In-capsule background helper
 
 extension VoiceGlowBeamView {
-    /// Capsule-bottom glow layer sized to the parent, with room for bloom bleed.
-    static func capsuleOverlay(
+    /// Glow that fills the parent capsule and is clipped by it (no outer bleed).
+    static func capsuleBackground(
         frame: VoiceGlowFrame,
         palette: VoiceGlowPalette = .colorful,
+        reachFraction: CGFloat = 0.72,
         reduceMotion: Bool
     ) -> some View {
         var adjusted = frame
@@ -202,13 +215,8 @@ extension VoiceGlowBeamView {
         return VoiceGlowBeamView(
             frame: adjusted,
             palette: palette,
-            bloomHeight: 26
+            reachFraction: reachFraction
         )
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 4)
-        .padding(.top, 2)
-        // Bleed below the capsule so lobes are not clipped by layout bounds.
-        .padding(.bottom, 10)
-        .offset(y: 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -202,36 +202,27 @@ struct FloatingDictationPillView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            pillBody
-            // Reserve a few points so the Voice glow is not clipped by the window.
-            Color.clear.frame(height: model.isRecording || model.isProcessing ? 8 : 0)
-        }
-        .background(alignment: .bottom) {
-            if model.isRecording || model.isProcessing {
-                voiceGlowLayer
+        pillBody
+            .onHover { hovering in
+                model.isHovering = hovering
             }
-        }
-        .onHover { hovering in
-            model.isHovering = hovering
-        }
-        .scaleEffect(model.isHovering ? 1.04 : 1.0)
-        .animation(.easeOut(duration: 0.12), value: model.isHovering)
-        .onTapGesture {
-            onToggle()
-        }
-        .contextMenu {
-            if model.isRecording {
-                Button("Cancel Dictation") {
-                    onCancel()
+            .scaleEffect(model.isHovering ? 1.04 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: model.isHovering)
+            .onTapGesture {
+                onToggle()
+            }
+            .contextMenu {
+                if model.isRecording {
+                    Button("Cancel Dictation") {
+                        onCancel()
+                    }
+                }
+                Button("Hide Pill") {
+                    SettingsStore.shared.showFloatingPill = false
                 }
             }
-            Button("Hide Pill") {
-                SettingsStore.shared.showFloatingPill = false
-            }
-        }
-        .help(model.isRecording ? "Click to stop dictation" : "Click to start dictation")
-        .fixedSize()
+            .help(model.isRecording ? "Click to stop dictation" : "Click to start dictation")
+            .fixedSize()
     }
 
     private var pillBody: some View {
@@ -270,13 +261,20 @@ struct FloatingDictationPillView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(
-            Capsule()
-                .fill(Color.black.opacity(0.84))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-                .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
-        )
-        .padding(.bottom, 4)
+        .background {
+            // Dark capsule fill + Voice glow as an in-capsule animated background.
+            ZStack {
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(0.84))
+
+                if model.isRecording || model.isProcessing {
+                    voiceGlowLayer
+                }
+            }
+        }
+        .clipShape(Capsule(style: .continuous))
+        .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
         .contentShape(Capsule())
     }
 
@@ -285,12 +283,14 @@ struct FloatingDictationPillView: View {
         TimelineView(.animation(paused: !(model.isRecording || model.isProcessing))) { context in
             let now = context.date.timeIntervalSinceReferenceDate
             let frame = model.voiceGlow.frame(at: now)
-            VoiceGlowBeamView.capsuleOverlay(
+            VoiceGlowBeamView.capsuleBackground(
                 frame: frame,
                 palette: .colorful,
+                reachFraction: 0.85,
                 reduceMotion: accessibilityReduceMotion
             )
         }
+        .blendMode(.plusLighter)
         .allowsHitTesting(false)
     }
 }

@@ -302,18 +302,18 @@ struct SubtitleView: View {
     var body: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
         // fade; the capsule is drawn inset by the same margins as this padding.
-        // Bottom pad is slightly larger so the Voice glow can bloom under the edge.
+        // Voice glow is a masked in-capsule background — not an outer bloom.
         pillContent
-            .padding(.horizontal, 44)
-            .padding(.top, 36)
-            .padding(.bottom, 52)
             .background(alignment: .bottom) {
                 voiceGlowLayer
             }
+            .padding(.horizontal, 44)
+            .padding(.top, 36)
+            .padding(.bottom, 44)
             .background(
                 SoftShadowPillBackground(
                     cornerRadius: 20,
-                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 52, right: 44)
+                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
                 )
             )
             .fixedSize()
@@ -329,12 +329,17 @@ struct SubtitleView: View {
             TimelineView(.animation(paused: !viewModel.isActive)) { context in
                 let now = context.date.timeIntervalSinceReferenceDate
                 let frame = viewModel.voiceGlow.frame(at: now)
-                VoiceGlowBeamView.capsuleOverlay(
+                VoiceGlowBeamView.capsuleBackground(
                     frame: frame,
                     palette: .colorful,
+                    reachFraction: 0.7,
                     reduceMotion: accessibilityReduceMotion
                 )
             }
+            // Match SoftShadowPillBackground's inset capsule so glow cannot
+            // spill into the outer shadow margin.
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .blendMode(.plusLighter)
             .allowsHitTesting(false)
         }
     }
