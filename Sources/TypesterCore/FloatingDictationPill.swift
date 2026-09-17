@@ -43,6 +43,11 @@ final class FloatingDictationPill {
             let hosting = NSHostingView(rootView: root)
             self.hosting = hosting
 
+            // Glow bleed is intentionally drawn outside the capsule bounds.
+            hosting.wantsLayer = true
+            hosting.layer?.masksToBounds = false
+            hosting.clipsToBounds = false
+
             let window: NSWindow
             if let existing = self.window {
                 window = existing
@@ -62,9 +67,6 @@ final class FloatingDictationPill {
                 window.isMovable = true
                 window.ignoresMouseEvents = false
                 window.contentView = hosting
-                hosting.wantsLayer = true
-                hosting.layer?.masksToBounds = false
-                hosting.clipsToBounds = false
                 self.window = window
             }
 
@@ -104,6 +106,7 @@ final class FloatingDictationPill {
             self.viewModel.isProcessing = false
             self.viewModel.voiceGlow.setProcessing(false)
             self.viewModel.voiceGlow.setActive(recording)
+            self.relayoutForGlowHeightChange()
         }
     }
 
@@ -117,14 +120,28 @@ final class FloatingDictationPill {
             self.viewModel.voiceGlow.setProcessing(processing)
             // Keep glow alive through the transcribe beam; clear when fully idle.
             self.viewModel.voiceGlow.setActive(processing || self.viewModel.isRecording)
+            self.relayoutForGlowHeightChange()
         }
     }
 
     /// Normalized mic level 0…1 from `AudioRecorder.onAudioLevel` (main thread).
     func setLevel(_ level: Float) {
-        DispatchQueue.main.async { [weak self] in
-            self?.viewModel.voiceGlow.update(level: level)
+        if Thread.isMainThread {
+            viewModel.voiceGlow.update(level: level)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.viewModel.voiceGlow.update(level: level)
+            }
         }
+    }
+
+    /// Borderless pill windows are not content-sized. Recording/processing
+    /// reserve extra bottom height for the Voice glow — re-measure and setFrame
+    /// or the window-server clips the bloom.
+    private func relayoutForGlowHeightChange() {
+        guard isVisible, let window, let hosting else { return }
+        hosting.layoutSubtreeIfNeeded()
+        layout(window: window, hosting: hosting)
     }
 
     private func layout(window: NSWindow, hosting: NSHostingView<FloatingDictationPillView>) {
