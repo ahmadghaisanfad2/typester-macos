@@ -7,6 +7,9 @@ final class SoftShadowPillNSView: NSView {
     var cornerRadius: CGFloat = 20
     /// Clear margin around the capsule where the shadow may fade.
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+    /// When true (Voice glow active): flat dark fill, no glass rim — keeps the
+    /// in-capsule glow fluid instead of cutting it with a bright edge plate.
+    var glowFill: Bool = false
 
     override var isOpaque: Bool { false }
     override var wantsUpdateLayer: Bool { false }
@@ -66,65 +69,75 @@ final class SoftShadowPillNSView: NSView {
         context.fillPath()
         context.restoreGState()
 
-        // Cool graphite glass fill — a touch of blue so it reads as hardware,
-        // not flat black, and still sits quietly over any app.
-        context.saveGState()
-        context.addPath(path)
-        context.clip()
-        let space = CGColorSpaceCreateDeviceRGB()
-        let fill = [
-            NSColor(srgbRed: 0.16, green: 0.17, blue: 0.19, alpha: 1).cgColor,
-            NSColor(srgbRed: 0.085, green: 0.09, blue: 0.10, alpha: 1).cgColor,
-            NSColor(srgbRed: 0.03, green: 0.032, blue: 0.04, alpha: 1).cgColor
-        ] as CFArray
-        if let gradient = CGGradient(colorsSpace: space, colors: fill, locations: [0, 0.55, 1]) {
-            context.drawLinearGradient(
-                gradient,
-                start: CGPoint(x: pill.midX, y: pill.maxY),
-                end: CGPoint(x: pill.midX, y: pill.minY),
-                options: []
-            )
-        }
-        context.restoreGState()
+        // Interior fill
+        if glowFill {
+            // Shadows only. The Voice glow canvas IS the capsule interior —
+            // no separate dark/glass plate behind the app name or waveform.
+        } else {
+            // Cool graphite glass fill — a touch of blue so it reads as hardware,
+            // not flat black, and still sits quietly over any app.
+            context.saveGState()
+            context.addPath(path)
+            context.clip()
+            let space = CGColorSpaceCreateDeviceRGB()
+            let fill = [
+                NSColor(srgbRed: 0.16, green: 0.17, blue: 0.19, alpha: 1).cgColor,
+                NSColor(srgbRed: 0.085, green: 0.09, blue: 0.10, alpha: 1).cgColor,
+                NSColor(srgbRed: 0.03, green: 0.032, blue: 0.04, alpha: 1).cgColor
+            ] as CFArray
+            if let gradient = CGGradient(colorsSpace: space, colors: fill, locations: [0, 0.55, 1]) {
+                context.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: pill.midX, y: pill.maxY),
+                    end: CGPoint(x: pill.midX, y: pill.minY),
+                    options: []
+                )
+            }
+            context.restoreGState()
 
-        // Hairline highlight: convert the edge to a stroke-shaped clip and fill
-        // it with a top-biased white gradient (the classic macOS glass rim).
-        context.saveGState()
-        context.addPath(path)
-        context.setLineWidth(1)
-        context.replacePathWithStrokedPath()
-        context.clip()
-        let rim = [
-            NSColor.white.withAlphaComponent(0.16).cgColor,
-            NSColor.white.withAlphaComponent(0.05).cgColor,
-            NSColor.white.withAlphaComponent(0.01).cgColor
-        ] as CFArray
-        if let rimGradient = CGGradient(colorsSpace: space, colors: rim, locations: [0, 0.45, 1]) {
-            context.drawLinearGradient(
-                rimGradient,
-                start: CGPoint(x: pill.midX, y: pill.maxY),
-                end: CGPoint(x: pill.midX, y: pill.minY),
-                options: []
-            )
+            // Hairline highlight: convert the edge to a stroke-shaped clip and fill
+            // it with a top-biased white gradient (the classic macOS glass rim).
+            // Skipped when glowFill is true so the Voice/border beam is not cut.
+            context.saveGState()
+            context.addPath(path)
+            context.setLineWidth(1)
+            context.replacePathWithStrokedPath()
+            context.clip()
+            let rim = [
+                NSColor.white.withAlphaComponent(0.16).cgColor,
+                NSColor.white.withAlphaComponent(0.05).cgColor,
+                NSColor.white.withAlphaComponent(0.01).cgColor
+            ] as CFArray
+            if let rimGradient = CGGradient(colorsSpace: space, colors: rim, locations: [0, 0.45, 1]) {
+                context.drawLinearGradient(
+                    rimGradient,
+                    start: CGPoint(x: pill.midX, y: pill.maxY),
+                    end: CGPoint(x: pill.midX, y: pill.minY),
+                    options: []
+                )
+            }
+            context.restoreGState()
         }
-        context.restoreGState()
     }
 }
 
 struct SoftShadowPillBackground: NSViewRepresentable {
     var cornerRadius: CGFloat = 20
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+    var glowFill: Bool = false
 
     func makeNSView(context: Context) -> SoftShadowPillNSView {
         let view = SoftShadowPillNSView()
         view.cornerRadius = cornerRadius
         view.margin = margin
+        view.glowFill = glowFill
         return view
     }
 
     func updateNSView(_ nsView: SoftShadowPillNSView, context: Context) {
         nsView.cornerRadius = cornerRadius
         nsView.margin = margin
+        nsView.glowFill = glowFill
         nsView.needsDisplay = true
     }
 }

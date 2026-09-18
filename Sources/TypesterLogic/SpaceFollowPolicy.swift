@@ -19,11 +19,16 @@ public enum SpaceFollowPolicy {
         case moveToActiveSpace
     }
 
-    /// Valid HUD set: auxiliary + out of cycle + move to active Space on reassert.
+    /// Valid HUD set: stay on every Space via `.canJoinAllSpaces`.
+    ///
+    /// Do **not** combine `.canJoinAllSpaces` or `.stationary` with
+    /// `.moveToActiveSpace` — AppKit rejects that pairing. After 1.22.0 crashes
+    /// and 1.22.1 HUD flakiness, membership is “all Spaces” + reaffirm z-order
+    /// only (no moveToActiveSpace).
     public static let hudFlags: [Flag] = [
+        .canJoinAllSpaces,
         .fullScreenAuxiliary,
         .ignoresCycle,
-        .moveToActiveSpace,
     ]
 
     /// True when the flag combination is accepted by AppKit collection-behavior validation.

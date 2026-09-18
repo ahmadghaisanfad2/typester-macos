@@ -6,8 +6,11 @@ final class SpaceFollowPolicyTests: XCTestCase {
         XCTAssertTrue(SpaceFollowPolicy.isValid(SpaceFollowPolicy.hudFlags))
         XCTAssertEqual(
             SpaceFollowPolicy.hudFlags,
-            [.fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]
+            [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         )
+        // Must not reintroduce the AppKit-invalid moveToActiveSpace pairings.
+        XCTAssertFalse(SpaceFollowPolicy.hudFlags.contains(.moveToActiveSpace))
+        XCTAssertFalse(SpaceFollowPolicy.hudFlags.contains(.stationary))
     }
 
     func test1220CollectionBehaviorIsRejected() {

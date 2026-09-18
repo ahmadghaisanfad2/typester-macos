@@ -1,6 +1,28 @@
 import XCTest
 @testable import TypesterCore
 
+final class VoiceBorderBeamSamplerTests: XCTestCase {
+    func testPointStaysInsideInsetBounds() {
+        let sampler = VoiceBorderBeamSampler(width: 200, height: 40, inset: 2)
+        for i in 0..<24 {
+            let phase = Float(i) / 24
+            let p = sampler.point(at: phase)
+            XCTAssertGreaterThanOrEqual(p.x, sampler.inset - 0.01)
+            XCTAssertLessThanOrEqual(p.x, sampler.width - sampler.inset + 0.01)
+            XCTAssertGreaterThanOrEqual(p.y, sampler.inset - 0.01)
+            XCTAssertLessThanOrEqual(p.y, sampler.height - sampler.inset + 0.01)
+        }
+    }
+
+    func testTrailNewestLastHasRisingU() {
+        let sampler = VoiceBorderBeamSampler(width: 120, height: 36, inset: 2)
+        let trail = sampler.trail(phase: 0.4, count: 8, span: 0.2)
+        XCTAssertEqual(trail.count, 8)
+        XCTAssertEqual(Double(trail.last?.u ?? -1), 1, accuracy: 0.001)
+        XCTAssertEqual(Double(trail.first?.u ?? -1), 0, accuracy: 0.001)
+    }
+}
+
 final class VoiceGlowModelTests: XCTestCase {
     func testColorfulPaletteHasMultipleLobes() {
         let palette = VoiceGlowPalette.colorful

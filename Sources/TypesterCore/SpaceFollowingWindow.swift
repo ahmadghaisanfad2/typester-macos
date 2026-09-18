@@ -15,7 +15,7 @@ public extension Notification.Name {
 enum SpaceFollowingWindow {
     /// Derived from `SpaceFollowPolicy.hudFlags`. AppKit aborts if
     /// `.moveToActiveSpace` is combined with `.canJoinAllSpaces` or
-    /// `.stationary` (Typester 1.22.0 onboarding Accessibility crash).
+    /// `.stationary`. HUDs use all-Spaces membership + reaffirm z-order.
     static let collectionBehavior: NSWindow.CollectionBehavior = {
         var behavior: NSWindow.CollectionBehavior = []
         for flag in SpaceFollowPolicy.hudFlags {
