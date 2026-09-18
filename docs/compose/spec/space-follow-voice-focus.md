@@ -1,14 +1,28 @@
 ---
 feature: space-follow-voice-focus
-status: in-progress
+status: delivered
 updated: 2026-09-18
 branch: fix/space-follow-voice-focus
-commits: 4cc8bad..HEAD
+commits: 4cc8bada96aa079472d72a4bf5b2312b695f7716..94a20dec92ac65f176011a866e76bce5173e61b2
 ---
 
 # Space Follow + Voice Focus
 
 ## Report
+
+**What was built** — Dictation HUDs (caption capsule, floating pill, learning toast, accessibility helper) now stay on the active macOS Space. `SpaceFollowingWindow` uses `[.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]`, a status-window+1 level, multi-pass reassert after Space swipes (0.05/0.20/0.45s), and reassert after activation-policy flips. Delayed passes require both `isVisible` and non-zero alpha so an ordered-out caption pill cannot be resurrected.
+
+Voice focus (`SettingsStore.focusOnMyVoice`, default on) enables Apple voice-processing on the mic path for every provider (and disables it on warm engines when the setting is off). On Soniox and Deepgram it enables diarization and keeps only the first speaker after dictation starts. Unlabeled tokens still pass through. Settings exposes a “Focus on my voice” toggle and a macOS Mic Modes helper (system Voice Isolation cannot be forced by the app). Span joining inserts spaces when unpadded speaker-filtered deltas are batched so primary-speaker words never glue.
+
+**Verification** — `swift build` PASS; `swift test` PASS (229 tests, 0 failures), including PrimarySpeakerFilterTests, VoiceFocusConfigTests, and span-join regressions. Independent review of `4cc8bad..25c00ca` found two criticals (Deepgram span glue; inverted Space reaffirm guard); fixed in `ed988f5` and re-review approved. Residual cross-message join fixed in the session assembler/overlay with tests. AppKit Space membership remains a residual manual check (swipe Desktop 1→2→3 while dictating).
+
+**Journey log**
+1. Prior v1.19.4 Space-follow (flags + single reaffirm) was insufficient for LSUIElement HUDs — policy flips and mid-transition reassert still pinned windows.
+2. `.moveToActiveSpace` + multi-pass `orderFrontRegardless` + activation-policy notification address the real failure modes.
+3. Review: STT span join must live in the shared router/assembler — provider parse alone cannot stop glued words after speaker filtering.
+4. Review: Space reaffirm skip-guard must AND `isVisible` and alpha; SubtitleOverlay never zeros window alpha before `orderOut`.
+5. Swift imports `setVoiceProcessingEnabled` as throwing, not `NSError**`; enable must run while the engine is stopped, then re-query input format.
+6. SwiftPM naming is inverted vs folders: module `TypesterCore` = `Sources/TypesterLogic`; folder `Sources/TypesterCore` = `TypesterUI`.
 
 ## [S1] Problem
 
@@ -36,7 +50,7 @@ User-chosen acceptance direction:
 
 **Contracts**
 
-1. `SpaceFollowingWindow.collectionBehavior` becomes:
+1. `SpaceFollowingWindow.collectionBehavior` is:
    `[.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]`.
    `.moveToActiveSpace` makes a later `orderFrontRegardless()` relocate the window onto the *current* Space when AppKit had pinned it elsewhere.
 
@@ -44,67 +58,45 @@ User-chosen acceptance direction:
 
 3. `SpaceFollowingWindow.reaffirm(_:)` re-applies collectionBehavior + level and calls `orderFrontRegardless()`.
 
-4. `SpaceFollowingWindow.reaffirmWithTransitionPasses(_:reposition:)` reasserts immediately, then again at ~0.05s, ~0.20s, ~0.45s. Each pass re-applies flags + `orderFrontRegardless()` and invokes `reposition`. Passes no-op if the window has been ordered out or alpha is ~0.
+4. `SpaceFollowingWindow.reaffirmWithTransitionPasses(_:reposition:)` reasserts immediately, then again at 0.05s, 0.20s, 0.45s. Delayed passes no-op unless `window.isVisible && window.alphaValue > 0.01` (AND — not OR).
 
-5. `SpaceObserver` observes:
-   - `NSWorkspace.activeSpaceDidChangeNotification`
-   - `TypesterActivationPolicyDidChange` (posted by AppDelegate after `setActivationPolicy`)
-   and calls the transition-pass reassert while `shouldReassert()` is true.
+5. `SpaceObserver` observes `NSWorkspace.activeSpaceDidChangeNotification` and `typesterActivationPolicyDidChange` (posted by AppDelegate after `setActivationPolicy`).
 
-6. Overlays (`SubtitleOverlay`, `FloatingDictationPill`, `LearningHUD`, `AccessibilityDragHelper`) use transition-pass reaffirm. `SubtitleOverlay` reasserts while `presentationPhase != .hidden` (not only `.visible`).
+6. Overlays use transition-pass reaffirm. `SubtitleOverlay` reasserts while `presentationPhase != .hidden`.
 
-7. No focus steal: windows stay `canBecomeKey/Main == false` where they already are; `orderFrontRegardless` only.
+7. No focus steal: windows stay `canBecomeKey/Main == false` where they already are.
 
-8. Residual manual check: swipe Spaces while dictating; capsule + floating pill must remain on the active Space. AppKit HUD Space membership is not covered by the logic test target.
+8. Residual manual check: swipe Spaces while dictating; capsule + floating pill must remain on the active Space.
 
 ### S2.2 Voice focus
 
-**Setting:** `SettingsStore.focusOnMyVoice: Bool = true` (persisted). When off, behavior matches today: raw input, no diarization filter.
+**Setting:** `SettingsStore.focusOnMyVoice: Bool = true` (persisted).
 
 **Local DSP (all providers)**
 
-- While the audio engine is *stopped* and before installing the input tap, if `focusOnMyVoice` is true, call `engine.inputNode.setVoiceProcessingEnabled(true, error:)` (macOS 10.15+). This enables Apple’s voice-processing AU (noise suppression / echo path / speech-focused DSP).
-- Re-query `inputNode.outputFormat(forBus: 0)` *after* enabling voice processing — the format can change — then build the converter/tap as today.
-- If enable fails, log and continue without it (graceful degradation). Do not abort recording.
-- When `focusOnMyVoice` is false, do not enable voice processing on newly created engines.
+- While the audio engine is stopped and before the input tap, if focus is on: `try inputNode.setVoiceProcessingEnabled(true)`, then re-query format.
+- If focus is off and a warm engine still has VP enabled: disable it.
+- Failure logs and continues; recording is not aborted.
 
-**System Voice Isolation (macOS Control Center)**
+**System Voice Isolation**
 
-- Apps cannot force `AVCaptureDevice.MicrophoneMode.voiceIsolation`; the user selects it. Settings shows a row when `focusOnMyVoice` is on:
-  - Status from `AVCaptureDevice.activeMicrophoneMode` / `preferredMicrophoneMode`.
-  - Button “Open Mic Modes…” → `AVCaptureDevice.showSystemUserInterface(.microphoneModes)`.
-- Footer copy: best results when macOS mic mode is Voice Isolation; Typester still applies voice-processing DSP and speaker filtering without it.
+- Apps cannot force `AVCaptureDevice.MicrophoneMode.voiceIsolation`. Settings shows active mic-mode label + “Open Mic Modes…” → `showSystemUserInterface(.microphoneModes)`.
 
 **Provider speaker filter**
 
-- Pure logic type `PrimarySpeakerFilter` in `TypesterLogic`:
-  - `nil` / empty speaker labels → always include (provider did not diarize).
-  - First non-empty speaker after `reset()` locks the session’s primary speaker.
-  - Subsequent tokens with a different speaker are dropped; same speaker is kept.
-  - `reset()` on each dictation session start / client connect.
-- `STTParseResult.transcript` gains an associated `speaker: String?` (default nil at call sites that have no labels).
-- `STTClientBase.routeParseResults` holds a `PrimarySpeakerFilter`. When `SettingsStore.shared.focusOnMyVoice` is true, tokens whose speaker is present and ≠ locked primary are dropped. When the setting is false, no filtering.
-- **Soniox realtime:** `SonioxRealtimeSessionConfig.build(..., focusOnMyVoice:)` sets `"enable_speaker_diarization": true` when focus is on. `SonioxConnectionConfig.parseResponse` copies `token["speaker"]` into the transcript result.
-- **Deepgram streaming:** when focus is on, query adds `diarize_model=latest`. `parseResponse` prefers `words[]` (with `speaker`) when present: filter words via the same first-speaker policy *inside* parse only if labels exist; if the response has no `words`, fall back to the channel transcript (unlabeled → include all). Token-level filter in `STTClientBase` still applies when speaker labels appear on words assembled into transcript pieces — Deepgram path will emit per-word transcripts with speaker so the shared filter can apply consistently.
-  Implementation note: Deepgram parse emits one `.transcript` per kept word span (or the full unlabeled transcript). Prefer emitting word-level results with `speaker` when `words` is present so `STTClientBase` owns the lock (single policy, testable).
-- **OpenAI / OpenRouter / Soniox async file path:** no realtime diarization filter. Local voice processing still applies to OpenAI/OpenRouter recording. OpenRouter batch models may transcribe other speech; out of scope for speaker filter.
-- Diarization + paste-on-pause: Soniox docs note endpoint detection reduces diarization accuracy. When both `focusOnMyVoice` and `pasteOnPause` are on, still enable diarization; do not change endpoint settings.
+- `PrimarySpeakerFilter`: unlabeled tokens always included; first non-empty speaker locks the session; other speakers dropped; `reset()` on connect.
+- `STTParseResult.transcript` carries `speaker: String?` (2-arg convenience for unlabeled).
+- `STTClientBase.routeParseResults` filters when focus is on and smart-joins unpadded spans with a single space.
+- Soniox: `enable_speaker_diarization: true`; parse copies `speaker`.
+- Deepgram: `diarize_model=latest`; word-level parse only when speaker labels exist; else channel transcript.
+- OpenAI/OpenRouter: no provider filter; local VP still applies.
+- `TranscriptSessionAssembler.appendFinal` and caption `updateFinal` smart-join unpadded deltas across messages.
 
-**Settings UI**
-
-- Dictation section: “Focus on my voice” toggle + footer explaining local DSP + first-speaker keep on Soniox/Deepgram + link/button for Mic Modes.
-- Default on.
+**Settings UI** — Dictation → Voice focus: toggle + footer + conditional mic-mode row.
 
 ### S2.3 Testing boundaries
 
-Logic target (`TypesterCore` / `Sources/TypesterLogic`) covers:
-- `PrimarySpeakerFilter` lock / drop / unlabeled / reset.
-- Soniox session config includes/excludes `enable_speaker_diarization`.
-- Deepgram query includes/excludes `diarize_model`.
-- Soniox/Deepgram parse emit speaker labels.
-- `STTClientBase` filtering behavior via a small test subclass or direct `routeParseResults` with focus flag (SettingsStore in tests: set `focusOnMyVoice` before the case).
-
-UI/AppKit Space membership is residual manual verification only.
+Logic target covers filter lock/drop/unlabeled/reset, Soniox/Deepgram config flags, parse speaker emission, routeParseResults filtering + span join, session-assembler join. AppKit Space membership is residual manual verification only.
 
 ## [S3] Out of Scope
 
@@ -112,13 +104,13 @@ UI/AppKit Space membership is residual manual verification only.
 - Forcing macOS Control Center Voice Isolation without user action.
 - Speaker enrollment / voiceprint models.
 - OpenAI/OpenRouter provider-side speaker filtering.
+- Language restriction (`language_hints_strict`).
 - Changing pill/capsule visual design or voice-glow work on other branches.
-- Language restriction (`language_hints_strict`) — not selected.
 
 ## Tasks
 
-- [ ] T1: Harden `SpaceFollowingWindow` (behavior flags, elevated level, transition-pass reaffirm, activation-policy notification) — acceptance: helper applies S2.1 contracts; observer reacts to Space *and* activation-policy changes (covers: S2.1)
-- [ ] T2: Wire overlays to transition-pass reaffirm (`SubtitleOverlay`, `FloatingDictationPill`, `LearningHUD`, `AccessibilityDragHelper`) and fix SubtitleOverlay shouldReassert to `phase != .hidden` — acceptance: all four call the multi-pass helper; AppDelegate posts activation-policy notification (covers: S2.1; depends: T1)
-- [ ] T3: Add `focusOnMyVoice` setting + `PrimarySpeakerFilter` + Soniox/Deepgram config and parse speaker plumbing — acceptance: setting persists; filter unit tests pass; Soniox config and Deepgram query honor the flag (covers: S2.2)
-- [ ] T4: `STTParseResult` speaker field + `STTClientBase` route filter + AudioRecorder voice-processing enable + Settings UI row/Mic Modes — acceptance: logic tests cover filter via routeParseResults; recorder attempts VP when setting on; Settings shows toggle and mic-mode helper (covers: S2.2; depends: T3)
-- [ ] T5: Build + run full test suite — acceptance: `swift build` and `swift test` pass with new tests (covers: S2.2, S2.3)
+- [x] T1: Harden `SpaceFollowingWindow` (behavior flags, elevated level, transition-pass reaffirm, activation-policy notification) — acceptance: helper applies S2.1 contracts; observer reacts to Space *and* activation-policy changes (covers: S2.1)
+- [x] T2: Wire overlays to transition-pass reaffirm (`SubtitleOverlay`, `FloatingDictationPill`, `LearningHUD`, `AccessibilityDragHelper`) and fix SubtitleOverlay shouldReassert to `phase != .hidden` — acceptance: all four call the multi-pass helper; AppDelegate posts activation-policy notification (covers: S2.1; depends: T1)
+- [x] T3: Add `focusOnMyVoice` setting + `PrimarySpeakerFilter` + Soniox/Deepgram config and parse speaker plumbing — acceptance: setting persists; filter unit tests pass; Soniox config and Deepgram query honor the flag (covers: S2.2)
+- [x] T4: `STTParseResult` speaker field + `STTClientBase` route filter + AudioRecorder voice-processing enable + Settings UI row/Mic Modes — acceptance: logic tests cover filter via routeParseResults; recorder attempts VP when setting on; Settings shows toggle and mic-mode helper (covers: S2.2; depends: T3)
+- [x] T5: Build + run full test suite — acceptance: `swift build` and `swift test` pass with new tests (covers: S2.2, S2.3)
