@@ -190,12 +190,11 @@ struct OnboardingView: View {
 
         if currentStep == 3 && !accessibilityPromptShown && !accessibilityGranted {
             accessibilityPromptShown = true
-            // System prompt + the exact Privacy pane. User only drags the icon
-            // and toggles — no hunting through Settings from a dead hotkey.
+            // System prompt + the exact Privacy pane. Drag the in-window icon
+            // onto the list — no second Typester helper window.
             TextPaster.requestAccessibilityPermission()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 TextPaster.openAccessibilitySettings()
-                AccessibilityDragHelper.shared.show()
             }
         }
     }

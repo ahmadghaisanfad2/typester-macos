@@ -876,7 +876,6 @@ struct SettingsView: View {
 
                         Button("Open System Settings") {
                             TextPaster.openAccessibilitySettings()
-                            AccessibilityDragHelper.shared.show()
                         }
                         .controlSize(.small)
 

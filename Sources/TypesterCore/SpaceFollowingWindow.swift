@@ -1,4 +1,5 @@
 import AppKit
+import TypesterCore
 
 public extension Notification.Name {
     /// Posted after `NSApp.setActivationPolicy` so HUD windows can re-pin to the active Space.
@@ -12,14 +13,22 @@ public extension Notification.Name {
 /// app. Activation-policy flips (Dock / settings windows) can re-pin them again.
 /// This helper applies sticky flags and multi-pass reassert across Space transitions.
 enum SpaceFollowingWindow {
-    static let collectionBehavior: NSWindow.CollectionBehavior = [
-        .canJoinAllSpaces,
-        .stationary,
-        .fullScreenAuxiliary,
-        .ignoresCycle,
-        // Relocate on orderFrontRegardless when AppKit pinned the window elsewhere.
-        .moveToActiveSpace,
-    ]
+    /// Derived from `SpaceFollowPolicy.hudFlags`. AppKit aborts if
+    /// `.moveToActiveSpace` is combined with `.canJoinAllSpaces` or
+    /// `.stationary` (Typester 1.22.0 onboarding Accessibility crash).
+    static let collectionBehavior: NSWindow.CollectionBehavior = {
+        var behavior: NSWindow.CollectionBehavior = []
+        for flag in SpaceFollowPolicy.hudFlags {
+            switch flag {
+            case .canJoinAllSpaces: behavior.insert(.canJoinAllSpaces)
+            case .stationary: behavior.insert(.stationary)
+            case .fullScreenAuxiliary: behavior.insert(.fullScreenAuxiliary)
+            case .ignoresCycle: behavior.insert(.ignoresCycle)
+            case .moveToActiveSpace: behavior.insert(.moveToActiveSpace)
+            }
+        }
+        return behavior
+    }()
 
     /// Above plain `.floating` / `.statusBar`; still below screensaver.
     static var hudWindowLevel: NSWindow.Level {

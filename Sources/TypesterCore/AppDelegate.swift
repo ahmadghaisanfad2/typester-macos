@@ -485,7 +485,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alreadyDismissedThisSession: PermissionRecovery.recoveryDismissedForSession()
         ) {
             showPermissionRecovery()
-            AccessibilityDragHelper.shared.show()
         }
         return false
     }

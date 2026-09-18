@@ -32,7 +32,7 @@ Features:
 - **Clipboard keeping** — Optional: keep each transcript on your clipboard so you can ⌘V it again when no text field was focused
 - **Secure API key storage** — Your API keys are stored in the macOS Keychain
 - **Launch at login** — Start automatically when you log in
-- **Shotbase-style permission setup** — Onboarding opens System Settings and floats a drag-to-grant Accessibility helper over the list
+- **Shotbase-style permission setup** — Onboarding opens System Settings; drag the in-window Typester icon into the Accessibility list (no second helper window)
 
 ## Requirements
 
