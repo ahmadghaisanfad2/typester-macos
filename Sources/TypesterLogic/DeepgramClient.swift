@@ -67,7 +67,10 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
             var results: [STTParseResult] = []
 
             // Prefer word-level speaker labels when diarization is enabled.
-            if let words = firstAlt["words"] as? [[String: Any]], !words.isEmpty {
+            // Without any speaker field, fall back to the channel transcript
+            // so smart_format punctuation is preserved.
+            if let words = firstAlt["words"] as? [[String: Any]], !words.isEmpty,
+               words.contains(where: { $0["speaker"] != nil }) {
                 var pendingText = ""
                 var pendingSpeaker: String?
                 var hasPending = false

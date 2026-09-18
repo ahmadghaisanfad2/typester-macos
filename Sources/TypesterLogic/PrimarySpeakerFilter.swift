@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Unlabeled tokens (provider did not diarize) are always included.
 /// `reset()` at the start of each dictation session so a new primary can lock.
+/// Not internally synchronized — callers must use one thread (STT routing is main).
 public final class PrimarySpeakerFilter {
     public private(set) var lockedSpeaker: String?
 

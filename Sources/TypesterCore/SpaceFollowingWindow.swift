@@ -50,8 +50,9 @@ enum SpaceFollowingWindow {
 
         for delay in transitionPassDelays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                // Skip if the HUD was ordered out or faded away mid-transition.
-                guard window.isVisible || window.alphaValue > 0.01 else { return }
+                // Skip if ordered out OR faded; OR would resurrect a hidden HUD
+                // that still has alpha 1 (SubtitleOverlay hide path).
+                guard window.isVisible, window.alphaValue > 0.01 else { return }
                 reaffirm(window)
                 reposition()
             }

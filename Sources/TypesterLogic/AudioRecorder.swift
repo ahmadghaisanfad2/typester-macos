@@ -362,6 +362,15 @@ public class AudioRecorder {
             } catch {
                 Debug.log("Voice processing unavailable: \(error.localizedDescription)")
             }
+        } else if inputNode.isVoiceProcessingEnabled {
+            // Warm engines may still have VP from a previous session when the
+            // user turned Focus on my voice off.
+            do {
+                try inputNode.setVoiceProcessingEnabled(false)
+                Debug.log("Voice processing disabled on mic path")
+            } catch {
+                Debug.log("Voice processing disable failed: \(error.localizedDescription)")
+            }
         }
 
         let inputFormat = inputNode.outputFormat(forBus: 0)

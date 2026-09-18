@@ -470,9 +470,19 @@ public class STTClientBase: NSObject, STTProvider {
                 if filterSpeakers, !primarySpeakerFilter.shouldInclude(speaker: speaker) {
                     continue
                 }
+                // Provider spans may omit padding between speaker runs; join with a
+                // space when neither side already has one so words never glue.
                 if isFinal {
+                    if !finalBatch.isEmpty, !text.isEmpty,
+                       !finalBatch.hasSuffix(" "), !text.hasPrefix(" ") {
+                        finalBatch += " "
+                    }
                     finalBatch += text
                 } else {
+                    if !interimBatch.isEmpty, !text.isEmpty,
+                       !interimBatch.hasSuffix(" "), !text.hasPrefix(" ") {
+                        interimBatch += " "
+                    }
                     interimBatch += text
                 }
             default:

@@ -175,6 +175,70 @@ final class VoiceFocusConfigTests: XCTestCase {
 
         XCTAssertEqual(finals, ["mine theirs "])
     }
+
+    /// Regression: Deepgram speaker-runs omit padding; router must insert spaces
+    /// so kept primary-speaker spans do not glue after another speaker is dropped.
+    func testRouteParseResultsJoinsUnpaddedSpansAfterFiltering() {
+        let previous = SettingsStore.shared.focusOnMyVoice
+        SettingsStore.shared.focusOnMyVoice = true
+        defer { SettingsStore.shared.focusOnMyVoice = previous }
+
+        let client = VoiceFocusRoutingTestClient()
+        var finals: [String] = []
+        client.onTranscript = { text, isFinal in
+            if isFinal { finals.append(text) }
+        }
+
+        client.routeParseResults([
+            .transcript(text: "hello world", isFinal: true, speaker: "0"),
+            .transcript(text: "other person", isFinal: true, speaker: "1"),
+            .transcript(text: "again mine", isFinal: true, speaker: "0")
+        ])
+
+        XCTAssertEqual(finals, ["hello world again mine"])
+    }
+
+    func testRouteParseResultsDoesNotDoubleSpaceWhenProviderPads() {
+        let previous = SettingsStore.shared.focusOnMyVoice
+        SettingsStore.shared.focusOnMyVoice = true
+        defer { SettingsStore.shared.focusOnMyVoice = previous }
+
+        let client = VoiceFocusRoutingTestClient()
+        var finals: [String] = []
+        client.onTranscript = { text, isFinal in
+            if isFinal { finals.append(text) }
+        }
+
+        client.routeParseResults([
+            .transcript(text: "hello ", isFinal: true, speaker: "1"),
+            .transcript(text: "world", isFinal: true, speaker: "1")
+        ])
+
+        XCTAssertEqual(finals, ["hello world"])
+    }
+
+    func testDeepgramUnlabeledWordsFallBackToChannelTranscript() {
+        let config = DeepgramConnectionConfig()
+        let json: [String: Any] = [
+            "is_final": true,
+            "channel": [
+                "alternatives": [[
+                    "transcript": "Hello, world.",
+                    "words": [
+                        ["word": "Hello"],
+                        ["word": "world"]
+                    ]
+                ]]
+            ]
+        ]
+        let results = config.parseResponse(json)
+        guard case .transcript(let text, _, let speaker) = results[0] else {
+            XCTFail("Expected channel transcript")
+            return
+        }
+        XCTAssertEqual(text, "Hello, world.")
+        XCTAssertNil(speaker)
+    }
 }
 
 /// Minimal STT client for exercising routeParseResults without a network connection.
