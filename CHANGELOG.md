@@ -2,6 +2,15 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.22.4] — 2026-09-18
+
+### Fixed
+- **Transcripts no longer split words** (`Wel com e back to o ur world` → `Welcome back to our world`). Soniox realtime tokens already include spaces at word boundaries; the assembler was inserting an extra space between every unpadded token. Join style is now provider-aware: Soniox concatenates tokens as-is; spaces are only added after a speaker-filter skip (or for Deepgram-style unpadded spans).
+
+### Notes
+- Dictate a short English line after updating — history should show normal words.
+- Mixed Arabic/English greetings should come through as continuous words, not letter groups.
+
 ## [1.22.3] — 2026-09-18
 
 ### Fixed
