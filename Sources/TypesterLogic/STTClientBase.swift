@@ -29,8 +29,14 @@ public enum STTParseResult {
 /// Protocol for STT client configuration - each provider implements this.
 public protocol STTConnectionConfig {
     var apiKey: String? { get }
+    /// Join style for unpadded transcript deltas from this provider.
+    var transcriptJoinStyle: TranscriptTokenJoinStyle { get }
     func makeWebSocketRequest() -> URLRequest?
     func parseResponse(_ json: [String: Any]) -> [STTParseResult]
+}
+
+public extension STTConnectionConfig {
+    var transcriptJoinStyle: TranscriptTokenJoinStyle { .spaceBetweenUnpadded }
 }
 
 /// Base class for speech-to-text WebSocket clients.
@@ -68,6 +74,9 @@ public class STTClientBase: NSObject, STTProvider {
     private var connectionReady = false
     /// Locks transcripts to the first labeled speaker when Focus on my voice is on.
     private let primarySpeakerFilter = PrimarySpeakerFilter()
+
+    /// Join style for unpadded deltas. Subclasses override (Soniox concatenates).
+    public var transcriptJoinStyle: TranscriptTokenJoinStyle { .spaceBetweenUnpadded }
 
     private struct OutgoingMessage {
         let id: UUID
@@ -463,27 +472,39 @@ public class STTClientBase: NSObject, STTProvider {
         var interimBatch = ""
         var otherResults: [STTParseResult] = []
         let filterSpeakers = SettingsStore.shared.focusOnMyVoice
+        let joinStyle = transcriptJoinStyle
+        var skippedFinal = false
+        var skippedInterim = false
 
         for result in results {
             switch result {
             case .transcript(let text, let isFinal, let speaker):
                 if filterSpeakers, !primarySpeakerFilter.shouldInclude(speaker: speaker) {
+                    if isFinal { skippedFinal = true } else { skippedInterim = true }
                     continue
                 }
-                // Provider spans may omit padding between speaker runs; join with a
-                // space when neither side already has one so words never glue.
                 if isFinal {
-                    if !finalBatch.isEmpty, !text.isEmpty,
-                       !finalBatch.hasSuffix(" "), !text.hasPrefix(" ") {
-                        finalBatch += " "
+                    if !finalBatch.isEmpty {
+                        if skippedFinal {
+                            finalBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(left: finalBatch, right: text)
+                        } else {
+                            finalBatch = TranscriptJoinPolicy.join(left: finalBatch, right: text, style: joinStyle)
+                        }
+                    } else {
+                        finalBatch = text
                     }
-                    finalBatch += text
+                    skippedFinal = false
                 } else {
-                    if !interimBatch.isEmpty, !text.isEmpty,
-                       !interimBatch.hasSuffix(" "), !text.hasPrefix(" ") {
-                        interimBatch += " "
+                    if !interimBatch.isEmpty {
+                        if skippedInterim {
+                            interimBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(left: interimBatch, right: text)
+                        } else {
+                            interimBatch = TranscriptJoinPolicy.join(left: interimBatch, right: text, style: joinStyle)
+                        }
+                    } else {
+                        interimBatch = text
                     }
-                    interimBatch += text
+                    skippedInterim = false
                 }
             default:
                 otherResults.append(result)

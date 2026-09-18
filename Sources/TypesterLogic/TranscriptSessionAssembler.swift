@@ -9,8 +9,11 @@ import Foundation
 public final class TranscriptSessionAssembler {
     public private(set) var finalText = ""
     public private(set) var interimText = ""
+    public var joinStyle: TranscriptTokenJoinStyle
 
-    public init() {}
+    public init(joinStyle: TranscriptTokenJoinStyle = SettingsStore.shared.sttProvider.transcriptJoinStyle) {
+        self.joinStyle = joinStyle
+    }
 
     public func reset() {
         finalText = ""
@@ -19,12 +22,7 @@ public final class TranscriptSessionAssembler {
 
     public func appendFinal(_ text: String) {
         guard !text.isEmpty else { return }
-        // Speaker-filtered provider spans may omit padding; join with a space
-        // when neither side already has one so pasted words never glue.
-        if !finalText.isEmpty, !finalText.hasSuffix(" "), !text.hasPrefix(" ") {
-            finalText += " "
-        }
-        finalText += text
+        finalText = TranscriptJoinPolicy.join(left: finalText, right: text, style: joinStyle)
         interimText = ""
     }
 

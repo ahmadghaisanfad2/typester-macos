@@ -24,7 +24,7 @@ final class TranscriptAssemblyTests: XCTestCase {
     }
 
     func testFinalTokensAppendAcrossBatchesWithoutPrefixDeduplication() {
-        let assembler = TranscriptSessionAssembler()
+        let assembler = TranscriptSessionAssembler(joinStyle: .spaceBetweenUnpadded)
 
         assembler.appendFinal("The first few words ")
         assembler.appendFinal("continue after the pause")
@@ -34,7 +34,7 @@ final class TranscriptAssemblyTests: XCTestCase {
     }
 
     func testAppendFinalInsertsSpaceBetweenUnpaddedDeltas() {
-        let assembler = TranscriptSessionAssembler()
+        let assembler = TranscriptSessionAssembler(joinStyle: .spaceBetweenUnpadded)
 
         assembler.appendFinal("hello world")
         assembler.appendFinal("again mine")
@@ -43,7 +43,7 @@ final class TranscriptAssemblyTests: XCTestCase {
     }
 
     func testAppendFinalDoesNotDoubleSpaceWhenProviderPads() {
-        let assembler = TranscriptSessionAssembler()
+        let assembler = TranscriptSessionAssembler(joinStyle: .spaceBetweenUnpadded)
 
         assembler.appendFinal("hello ")
         assembler.appendFinal("world")
@@ -52,7 +52,7 @@ final class TranscriptAssemblyTests: XCTestCase {
     }
 
     func testInterimIsReplacedAndFinalClearsInterim() {
-        let assembler = TranscriptSessionAssembler()
+        let assembler = TranscriptSessionAssembler(joinStyle: .concatenate)
 
         assembler.replaceInterim("The first wor")
         assembler.replaceInterim("The first words")
@@ -64,7 +64,7 @@ final class TranscriptAssemblyTests: XCTestCase {
     }
 
     func testResetStartsAIndependentSession() {
-        let assembler = TranscriptSessionAssembler()
+        let assembler = TranscriptSessionAssembler(joinStyle: .concatenate)
         assembler.appendFinal("old session")
 
         assembler.reset()

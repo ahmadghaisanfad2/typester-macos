@@ -142,7 +142,7 @@ final class VoiceFocusConfigTests: XCTestCase {
         SettingsStore.shared.focusOnMyVoice = true
         defer { SettingsStore.shared.focusOnMyVoice = previous }
 
-        let client = VoiceFocusRoutingTestClient()
+        let client = SonioxClient()
         var finals: [String] = []
         client.onTranscript = { text, isFinal in
             if isFinal { finals.append(text) }
@@ -154,6 +154,7 @@ final class VoiceFocusConfigTests: XCTestCase {
             .transcript(text: "again", isFinal: true, speaker: "1")
         ])
 
+        // Soniox concatenates; filter skip still inserts a boundary space.
         XCTAssertEqual(finals, ["mine again"])
     }
 
@@ -162,7 +163,7 @@ final class VoiceFocusConfigTests: XCTestCase {
         SettingsStore.shared.focusOnMyVoice = false
         defer { SettingsStore.shared.focusOnMyVoice = previous }
 
-        let client = VoiceFocusRoutingTestClient()
+        let client = SonioxClient()
         var finals: [String] = []
         client.onTranscript = { text, isFinal in
             if isFinal { finals.append(text) }
@@ -183,7 +184,8 @@ final class VoiceFocusConfigTests: XCTestCase {
         SettingsStore.shared.focusOnMyVoice = true
         defer { SettingsStore.shared.focusOnMyVoice = previous }
 
-        let client = VoiceFocusRoutingTestClient()
+        // Deepgram-style client (spaceBetweenUnpadded) + filter skip.
+        let client = DeepgramStyleRoutingTestClient()
         var finals: [String] = []
         client.onTranscript = { text, isFinal in
             if isFinal { finals.append(text) }
@@ -203,7 +205,7 @@ final class VoiceFocusConfigTests: XCTestCase {
         SettingsStore.shared.focusOnMyVoice = true
         defer { SettingsStore.shared.focusOnMyVoice = previous }
 
-        let client = VoiceFocusRoutingTestClient()
+        let client = SonioxClient()
         var finals: [String] = []
         client.onTranscript = { text, isFinal in
             if isFinal { finals.append(text) }
@@ -246,4 +248,12 @@ private final class VoiceFocusRoutingTestClient: STTClientBase {
     override func makeConnectionConfig() -> STTConnectionConfig {
         SonioxConnectionConfig()
     }
+    override var transcriptJoinStyle: TranscriptTokenJoinStyle { .concatenate }
+}
+
+private final class DeepgramStyleRoutingTestClient: STTClientBase {
+    override func makeConnectionConfig() -> STTConnectionConfig {
+        DeepgramConnectionConfig()
+    }
+    override var transcriptJoinStyle: TranscriptTokenJoinStyle { .spaceBetweenUnpadded }
 }

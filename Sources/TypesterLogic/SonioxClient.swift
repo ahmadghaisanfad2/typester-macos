@@ -49,6 +49,8 @@ public enum SonioxRealtimeSessionConfig {
 public struct SonioxConnectionConfig: STTConnectionConfig {
     public init() {}
     public var apiKey: String? { SettingsStore.shared.apiKey }
+    /// Soniox realtime tokens include spaces at word boundaries when needed.
+    public var transcriptJoinStyle: TranscriptTokenJoinStyle { .concatenate }
 
     public func makeWebSocketRequest() -> URLRequest? {
         let url = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
@@ -99,6 +101,8 @@ public struct SonioxConnectionConfig: STTConnectionConfig {
 /// Soniox speech-to-text client.
 public class SonioxClient: STTClientBase {
     public override init() { super.init() }
+    /// Soniox realtime tokens include spaces at word boundaries when needed.
+    public override var transcriptJoinStyle: TranscriptTokenJoinStyle { .concatenate }
     override func makeConnectionConfig() -> STTConnectionConfig {
         SonioxConnectionConfig()
     }

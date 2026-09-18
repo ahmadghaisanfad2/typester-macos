@@ -33,6 +33,17 @@ public enum STTProviderType: String, Codable, CaseIterable {
         }
     }
 
+    /// How unpadded transcript deltas from this provider should be joined.
+    /// Soniox realtime tokens carry their own spaces — forcing a space between
+    /// every token splits words (“Wel com e”). Deepgram diarized runs are
+    /// unpadded spans and need a boundary space.
+    public var transcriptJoinStyle: TranscriptTokenJoinStyle {
+        switch self {
+        case .soniox: return .concatenate
+        case .deepgram, .openai, .openrouter: return .spaceBetweenUnpadded
+        }
+    }
+
     /// True when the provider buffers audio and returns text only after stop (no live interim).
     public var isBatchTranscription: Bool {
         switch self {
