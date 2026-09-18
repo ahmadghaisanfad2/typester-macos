@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.22.1] — 2026-09-18
+
+### Fixed
+- **Onboarding Accessibility crash.** Typester 1.22.0 aborted when step 3 presented the Accessibility helper. AppKit rejects HUD `collectionBehavior` that combined `.moveToActiveSpace` with `.canJoinAllSpaces` or `.stationary`. Overlay windows now use a validated flag set (`.fullScreenAuxiliary` + `.ignoresCycle` + `.moveToActiveSpace`) via `SpaceFollowPolicy`.
+- **Single-window Accessibility grant.** Removed the floating drag-helper window. Onboarding, Settings, and permission recovery keep one in-window Typester drag tile and open System Settings — no second Typester window.
+
+### Notes
+- Stable-signed 1.22.1 keeps Accessibility / Microphone grants from earlier stable builds.
+- Install from the DMG or use **Check for Updates…** in the menu bar.
+
 ## [1.22.0] — 2026-09-18
 
 ### Fixed
