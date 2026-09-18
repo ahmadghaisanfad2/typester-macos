@@ -60,8 +60,11 @@ final class AccessibilityDragHelper {
             }
 
             window.alphaValue = 0
-            SpaceFollowingWindow.reaffirm(window)
-            self.layout(window: window, hosting: hosting)
+            SpaceFollowingWindow.reaffirmWithTransitionPasses(window) { [weak self] in
+                guard let self, let window = self.window,
+                      let hosting = window.contentView as? NSHostingView<AccessibilityDragHelperView> else { return }
+                self.layout(window: window, hosting: hosting)
+            }
             self.beginSpaceFollowing()
             self.isPresented = true
 
@@ -135,8 +138,9 @@ final class AccessibilityDragHelper {
             handler: { [weak self] in
                 guard let self, let window = self.window,
                       let hosting = window.contentView as? NSHostingView<AccessibilityDragHelperView> else { return }
-                SpaceFollowingWindow.reaffirm(window)
-                self.layout(window: window, hosting: hosting)
+                SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
+                    self.layout(window: window, hosting: hosting)
+                }
             }
         )
     }

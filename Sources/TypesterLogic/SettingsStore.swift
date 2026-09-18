@@ -194,6 +194,13 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Prefer the dictating user’s voice: Apple voice-processing DSP + primary-speaker filter.
+    @Published public var focusOnMyVoice: Bool = true {
+        didSet {
+            UserDefaults.standard.set(focusOnMyVoice, forKey: focusOnMyVoiceKey)
+        }
+    }
+
     private let shortcutKeysKey = "shortcutKeys"
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
@@ -218,6 +225,7 @@ public class SettingsStore: ObservableObject {
     private let removeFillerWordsKey = "removeFillerWords"
     private let showFloatingPillKey = "showFloatingPill"
     private let showInDockKey = "showInDock"
+    private let focusOnMyVoiceKey = "focusOnMyVoice"
     private let keychainService = "com.typester.api"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
@@ -241,6 +249,7 @@ public class SettingsStore: ObservableObject {
         loadSonioxMode()
         loadOpenRouterModelID()
         loadFeedbackPreferences()
+        loadFocusOnMyVoicePreference()
         syncLaunchAtLoginStatus()
     }
 
@@ -408,6 +417,12 @@ public class SettingsStore: ObservableObject {
     private func loadShowLearningHUDPreference() {
         if UserDefaults.standard.object(forKey: showLearningHUDKey) != nil {
             showLearningHUD = UserDefaults.standard.bool(forKey: showLearningHUDKey)
+        }
+    }
+
+    private func loadFocusOnMyVoicePreference() {
+        if UserDefaults.standard.object(forKey: focusOnMyVoiceKey) != nil {
+            focusOnMyVoice = UserDefaults.standard.bool(forKey: focusOnMyVoiceKey)
         }
     }
 

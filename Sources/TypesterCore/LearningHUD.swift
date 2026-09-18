@@ -58,8 +58,10 @@ final class LearningHUD {
             }
 
             window.alphaValue = 0
-            SpaceFollowingWindow.reaffirm(window)
-            self.reposition(window: window, hosting: hosting)
+            SpaceFollowingWindow.reaffirmWithTransitionPasses(window) { [weak self] in
+                guard let self else { return }
+                self.reposition(window: window, hosting: hosting)
+            }
             self.beginSpaceFollowing()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
@@ -95,8 +97,9 @@ final class LearningHUD {
             handler: { [weak self] in
                 guard let self, let window = self.window,
                       let hosting = window.contentView as? NSHostingView<LearningHUDView> else { return }
-                SpaceFollowingWindow.reaffirm(window)
-                self.reposition(window: window, hosting: hosting)
+                SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
+                    self.reposition(window: window, hosting: hosting)
+                }
             }
         )
     }

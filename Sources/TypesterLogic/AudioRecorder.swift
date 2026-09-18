@@ -352,6 +352,27 @@ public class AudioRecorder {
         }
 
         let inputNode = engine.inputNode
+
+        // Apple voice-processing DSP (noise / speech focus) before reading formats —
+        // enabling it can change the input node's hardware format.
+        if SettingsStore.shared.focusOnMyVoice {
+            do {
+                try inputNode.setVoiceProcessingEnabled(true)
+                Debug.log("Voice processing enabled on mic path")
+            } catch {
+                Debug.log("Voice processing unavailable: \(error.localizedDescription)")
+            }
+        } else if inputNode.isVoiceProcessingEnabled {
+            // Warm engines may still have VP from a previous session when the
+            // user turned Focus on my voice off.
+            do {
+                try inputNode.setVoiceProcessingEnabled(false)
+                Debug.log("Voice processing disabled on mic path")
+            } catch {
+                Debug.log("Voice processing disable failed: \(error.localizedDescription)")
+            }
+        }
+
         let inputFormat = inputNode.outputFormat(forBus: 0)
         if state.wasAbandoned { return nil }
 

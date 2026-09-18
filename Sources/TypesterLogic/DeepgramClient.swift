@@ -5,14 +5,15 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
     public init() {}
     public var apiKey: String? { SettingsStore.shared.deepgramApiKey }
 
-    public func makeWebSocketRequest() -> URLRequest? {
-        guard let apiKey = apiKey else { return nil }
-
-        var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
-        // Disable silence endpointing unless paste-on-pause is enabled (was 100ms — very choppy).
-        let endpointing = SettingsStore.shared.pasteOnPause ? "500" : "false"
-        urlComponents.queryItems = [
-            URLQueryItem(name: "model", value: STTProviderType.deepgram.modelID),
+    /// Query items for the streaming listen endpoint.
+    public static func makeQueryItems(
+        modelID: String,
+        pasteOnPause: Bool,
+        focusOnMyVoice: Bool
+    ) -> [URLQueryItem] {
+        let endpointing = pasteOnPause ? "500" : "false"
+        var queryItems = [
+            URLQueryItem(name: "model", value: modelID),
             URLQueryItem(name: "language", value: "multi"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: "16000"),
@@ -22,6 +23,21 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "endpointing", value: endpointing)
         ]
+        if focusOnMyVoice {
+            queryItems.append(URLQueryItem(name: "diarize_model", value: "latest"))
+        }
+        return queryItems
+    }
+
+    public func makeWebSocketRequest() -> URLRequest? {
+        guard let apiKey = apiKey else { return nil }
+
+        var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
+        urlComponents.queryItems = Self.makeQueryItems(
+            modelID: STTProviderType.deepgram.modelID,
+            pasteOnPause: SettingsStore.shared.pasteOnPause,
+            focusOnMyVoice: SettingsStore.shared.focusOnMyVoice
+        )
 
         var request = URLRequest(url: urlComponents.url!)
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -43,29 +59,90 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
         // Parse transcript
         if let channel = json["channel"] as? [String: Any],
            let alternatives = channel["alternatives"] as? [[String: Any]],
-           let firstAlt = alternatives.first,
-           let transcript = firstAlt["transcript"] as? String,
-           !transcript.isEmpty {
-
-            var results: [STTParseResult] = []
+           let firstAlt = alternatives.first {
 
             let isFinal = json["is_final"] as? Bool ?? false
             let speechFinal = json["speech_final"] as? Bool ?? false
             let fromFinalize = json["from_finalize"] as? Bool ?? false
+            var results: [STTParseResult] = []
 
-            Debug.log("Transcript: '\(transcript)' isFinal=\(isFinal) speechFinal=\(speechFinal)")
+            // Prefer word-level speaker labels when diarization is enabled.
+            // Without any speaker field, fall back to the channel transcript
+            // so smart_format punctuation is preserved.
+            if let words = firstAlt["words"] as? [[String: Any]], !words.isEmpty,
+               words.contains(where: { $0["speaker"] != nil }) {
+                var pendingText = ""
+                var pendingSpeaker: String?
+                var hasPending = false
 
-            results.append(.transcript(text: transcript, isFinal: isFinal))
+                func flushPending() {
+                    guard hasPending, !pendingText.isEmpty else { return }
+                    results.append(.transcript(text: pendingText, isFinal: isFinal, speaker: pendingSpeaker))
+                    pendingText = ""
+                    hasPending = false
+                }
+
+                for word in words {
+                    guard let wordText = word["word"] as? String, !wordText.isEmpty else { continue }
+                    let speaker: String?
+                    if let speakerInt = word["speaker"] as? Int {
+                        speaker = String(speakerInt)
+                    } else if let speakerString = word["speaker"] as? String {
+                        speaker = speakerString
+                    } else {
+                        speaker = nil
+                    }
+
+                    if hasPending && speaker != pendingSpeaker {
+                        flushPending()
+                    }
+                    if pendingText.isEmpty {
+                        pendingText = wordText
+                    } else {
+                        pendingText += " " + wordText
+                    }
+                    pendingSpeaker = speaker
+                    hasPending = true
+                }
+                flushPending()
+
+                if !results.isEmpty {
+                    Debug.log("Transcript (diarized) isFinal=\(isFinal) speechFinal=\(speechFinal)")
+                    if speechFinal {
+                        results.append(.endpoint)
+                    }
+                    if fromFinalize {
+                        results.append(.finalizeAcknowledged)
+                    }
+                    return results
+                }
+            }
+
+            if let transcript = firstAlt["transcript"] as? String,
+               !transcript.isEmpty {
+                Debug.log("Transcript: '\(transcript)' isFinal=\(isFinal) speechFinal=\(speechFinal)")
+                results.append(.transcript(text: transcript, isFinal: isFinal, speaker: nil))
+
+                if speechFinal {
+                    results.append(.endpoint)
+                }
+
+                if fromFinalize {
+                    results.append(.finalizeAcknowledged)
+                }
+
+                return results
+            }
 
             if speechFinal {
                 results.append(.endpoint)
             }
-
             if fromFinalize {
                 results.append(.finalizeAcknowledged)
             }
-
-            return results
+            if !results.isEmpty {
+                return results
+            }
         }
 
         // Deepgram may acknowledge Finalize in a result without a transcript.

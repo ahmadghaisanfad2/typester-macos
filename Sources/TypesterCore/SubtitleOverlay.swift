@@ -87,6 +87,9 @@ class SubtitleViewModel: ObservableObject {
 
     func updateFinal(_ text: String) {
         guard showStreamPreview, !isProcessing else { return }
+        if !finalText.isEmpty, !text.isEmpty, !finalText.hasSuffix(" "), !text.hasPrefix(" ") {
+            finalText += " "
+        }
         finalText += text
         interimText = ""
     }
@@ -463,10 +466,12 @@ class SubtitleOverlay {
             self.viewModel.show(appName: appName, appIcon: appIcon)
             self.ensureWindow()
             self.beginSpaceFollowing()
-            // orderFrontRegardless keeps a non-activating menu-bar pill on the
-            // current Space; orderFront can leave it pinned to the first one.
+            // Multi-pass reaffirm keeps the non-activating HUD on the active Space
+            // across swipe transitions and activation-policy flips.
             if let window = self.window {
-                SpaceFollowingWindow.reaffirm(window)
+                SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
+                    self.repositionWindow()
+                }
             }
             // First lay out the compact starting state, then animate to the
             // resting state on the next runloop. This keeps the shadow and
@@ -599,14 +604,16 @@ class SubtitleOverlay {
     private func beginSpaceFollowing() {
         spaceObserver.start(
             shouldReassert: { [weak self] in
-                guard let self, let window = self.window else { return false }
-                // Keep the pill on the active Space only while it is fully shown.
-                return window.isVisible && self.viewModel.presentationPhase == .visible
+                guard let self, self.window != nil else { return false }
+                // Reassert for the whole on-screen lifecycle, including
+                // presenting/dismissing — not only the fully visible phase.
+                return self.viewModel.presentationPhase != .hidden
             },
             handler: { [weak self] in
                 guard let self, let window = self.window else { return }
-                SpaceFollowingWindow.reaffirm(window)
-                self.repositionWindow()
+                SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
+                    self.repositionWindow()
+                }
             }
         )
     }

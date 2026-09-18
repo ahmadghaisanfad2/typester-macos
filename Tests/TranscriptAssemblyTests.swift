@@ -9,8 +9,8 @@ final class TranscriptAssemblyTests: XCTestCase {
             if isFinal { finals.append(text) }
         }
 
-        client.routeParseResults([.transcript(text: "first ", isFinal: true)])
-        client.routeParseResults([.transcript(text: "second", isFinal: true)])
+        client.routeParseResults([.transcript(text: "first ", isFinal: true, speaker: nil)])
+        client.routeParseResults([.transcript(text: "second", isFinal: true, speaker: nil)])
 
         XCTAssertEqual(finals, ["first ", "second"])
     }
@@ -31,6 +31,24 @@ final class TranscriptAssemblyTests: XCTestCase {
 
         XCTAssertEqual(assembler.finalText, "The first few words continue after the pause")
         XCTAssertEqual(assembler.resolvedText, "The first few words continue after the pause")
+    }
+
+    func testAppendFinalInsertsSpaceBetweenUnpaddedDeltas() {
+        let assembler = TranscriptSessionAssembler()
+
+        assembler.appendFinal("hello world")
+        assembler.appendFinal("again mine")
+
+        XCTAssertEqual(assembler.finalText, "hello world again mine")
+    }
+
+    func testAppendFinalDoesNotDoubleSpaceWhenProviderPads() {
+        let assembler = TranscriptSessionAssembler()
+
+        assembler.appendFinal("hello ")
+        assembler.appendFinal("world")
+
+        XCTAssertEqual(assembler.finalText, "hello world")
     }
 
     func testInterimIsReplacedAndFinalClearsInterim() {

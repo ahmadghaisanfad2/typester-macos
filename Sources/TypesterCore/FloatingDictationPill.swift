@@ -65,8 +65,10 @@ final class FloatingDictationPill {
             }
 
             window.alphaValue = 0
-            SpaceFollowingWindow.reaffirm(window)
-            self.layout(window: window, hosting: hosting)
+            SpaceFollowingWindow.reaffirmWithTransitionPasses(window) { [weak self] in
+                guard let self, let window = self.window, let hosting = self.hosting else { return }
+                self.layout(window: window, hosting: hosting)
+            }
             self.beginSpaceFollowing()
             self.isVisible = true
 
@@ -132,8 +134,9 @@ final class FloatingDictationPill {
             handler: { [weak self] in
                 guard let self, let window = self.window,
                       let hosting = self.hosting else { return }
-                SpaceFollowingWindow.reaffirm(window)
-                self.layout(window: window, hosting: hosting)
+                SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
+                    self.layout(window: window, hosting: hosting)
+                }
             }
         )
     }
