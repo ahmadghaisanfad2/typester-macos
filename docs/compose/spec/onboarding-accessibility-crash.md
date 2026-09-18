@@ -1,14 +1,27 @@
 ---
 feature: onboarding-accessibility-crash
-status: in-progress
+status: delivered
 updated: 2026-09-18
 branch: fix/onboarding-accessibility-crash
-commits: # filled at delivery
+commits: e302398..82ae3e3
 ---
 
 # Onboarding Accessibility Crash + Single-Window Grant UX
 
 ## Report
+
+**What was built** — Typester 1.22.0 aborted in onboarding step 3 because `SpaceFollowingWindow.configure` assigned `NSWindow.CollectionBehavior` flags AppKit rejects: `.moveToActiveSpace` combined with `.canJoinAllSpaces` and `.stationary`. Crash reports showed `-[NSWindow _validateCollectionBehavior:]` from `AccessibilityDragHelper.show()`. HUD collection behavior now derives from `SpaceFollowPolicy.hudFlags` = `[.fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]`.
+
+The floating `AccessibilityDragHelper` (second drag window beside onboarding/Settings/recovery) is gone. Grant UX is one Typester window + System Settings: in-window `DraggableAppIconTile` remains the drag source; step 3 still opens the Accessibility pane automatically.
+
+**Verification** — `swift build` PASS; `swift test` PASS (244 tests, 0 failures), including `SpaceFollowPolicyTests` (rejects the 1.22.0 flag set) and `AccessibilityGrantPresentationTests`. Independent review of `e302398..82ae3e3` approved all six acceptance criteria; no critical findings. Residual manual check: launch onboarding to Accessibility step on macOS — no crash, Settings opens, only one drag tile.
+
+**Journey log**
+1. 1.22.0 space-follow added `.moveToActiveSpace` on top of older `.canJoinAllSpaces` + `.stationary`; AppKit treats those pairs as mutually exclusive and aborts.
+2. Onboarding was the first crash site because it auto-showed a borderless helper window that shared `SpaceFollowingWindow.configure` with caption/pill/toast HUDs.
+3. Single-source-of-truth: UI maps `SpaceFollowPolicy.hudFlags`; tests fail if the invalid combo returns.
+4. User preference: never present a second floating drag helper — Settings/recovery/open-settings paths use the same single-window rule.
+5. SwiftPM names are inverted vs folders: module `TypesterCore` = `Sources/TypesterLogic`; folder `Sources/TypesterCore` = `TypesterUI`.
 
 ## [S1] Problem
 
@@ -58,7 +71,7 @@ Second user-visible defect: onboarding already embeds a `DraggableAppIconTile` i
 - `moveToActiveSpace` together with `canJoinAllSpaces`
 - `moveToActiveSpace` together with `stationary`
 
-`SpaceFollowingWindow` must derive AppKit `collectionBehavior` from `SpaceFollowPolicy.hudFlags` so UI cannot reintroduce the crash combo.
+`SpaceFollowingWindow` derives AppKit `collectionBehavior` from `SpaceFollowPolicy.hudFlags` so UI cannot reintroduce the crash combo.
 
 ### S2.2 Single-window Accessibility grant UX
 
@@ -69,16 +82,16 @@ Grant UX is **one Typester window + System Settings**.
 | Onboarding step 3 | yes (in-window) | yes | **no** |
 | Settings → Permissions | yes (in-window) | yes | **no** |
 | Permission recovery panel | yes (in-window) | yes | **no** |
-| Dictation blocked (no recovery panel path) | recovery panel only | via recovery | **no** |
+| Dictation blocked (recovery panel path) | recovery panel only | via recovery | **no** |
 
 **Contracts:**
 
 1. Remove every `AccessibilityDragHelper.shared.show()` call site (`OnboardingView`, `SettingsView`, `PermissionRecoveryView`, `AppDelegate.ensureAccessibilityForDictation`).
-2. Delete `AccessibilityDragHelper.swift` (class + view). Dead floating helper is worse than none.
+2. Delete `AccessibilityDragHelper.swift` (class + view).
 3. Onboarding step 3 still auto-opens the system prompt and Privacy → Accessibility pane; it does **not** spawn a second Typester window.
 4. In-window `DraggableAppIconTile` remains the drag source; pasteboard types stay Finder-like (`public.file-url` + `NSFilenamesPboardType`).
 5. Pure policy: `AccessibilityGrantPresentation.presentsFloatingDragHelper == false` documents the product rule in logic tests.
-6. README Shotbase-style bullet updates to describe single-window grant, not a floating helper over Settings.
+6. README Shotbase-style bullet describes single-window grant, not a floating helper over Settings.
 
 ### S2.3 Regression coverage
 
@@ -97,8 +110,8 @@ AppKit cannot be fully exercised in unit tests; residual manual check is: launch
 
 ## Tasks
 
-- [ ] T1: Add `SpaceFollowPolicy` in TypesterLogic with valid HUD flags + mutual-exclusion validation — acceptance: unit tests pass; policy rejects the 1.22.0 combo and accepts `hudFlags` (covers: S2.1)
-- [ ] T2: Point `SpaceFollowingWindow.configure`/`reaffirm` at `SpaceFollowPolicy.hudFlags` — acceptance: UI target compiles; collectionBehavior no longer includes `.canJoinAllSpaces` or `.stationary` with `.moveToActiveSpace` (covers: S2.1; depends: T1)
-- [ ] T3: Remove floating Accessibility drag helper from grant UX — acceptance: no `AccessibilityDragHelper.shared.show()` call sites remain; `AccessibilityDragHelper.swift` deleted; onboarding/settings/recovery keep in-window tiles only (covers: S2.2)
-- [ ] T4: Add presentation policy + tests and update README wording — acceptance: new tests pass; README describes single-window grant (covers: S2.2, S2.3; depends: T3)
-- [ ] T5: Full package verification — acceptance: `swift build` and `swift test` pass in the worktree (covers: S2.3; depends: T1–T4)
+- [x] T1: Add `SpaceFollowPolicy` in TypesterLogic with valid HUD flags + mutual-exclusion validation — acceptance: unit tests pass; policy rejects the 1.22.0 combo and accepts `hudFlags` (covers: S2.1)
+- [x] T2: Point `SpaceFollowingWindow.configure`/`reaffirm` at `SpaceFollowPolicy.hudFlags` — acceptance: UI target compiles; collectionBehavior no longer includes `.canJoinAllSpaces` or `.stationary` with `.moveToActiveSpace` (covers: S2.1; depends: T1)
+- [x] T3: Remove floating Accessibility drag helper from grant UX — acceptance: no `AccessibilityDragHelper.shared.show()` call sites remain; `AccessibilityDragHelper.swift` deleted; onboarding/settings/recovery keep in-window tiles only (covers: S2.2)
+- [x] T4: Add presentation policy + tests and update README wording — acceptance: new tests pass; README describes single-window grant (covers: S2.2, S2.3; depends: T3)
+- [x] T5: Full package verification — acceptance: `swift build` and `swift test` pass in the worktree (covers: S2.3; depends: T1–T4)
