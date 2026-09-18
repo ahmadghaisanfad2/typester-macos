@@ -81,6 +81,40 @@ automatically. Complete both one-time steps:
 Future releases signed with the same stable identity keep these grants.
 EOF
 
+# Prefer the matching CHANGELOG.md section when present.
+CHANGELOG="$PROJECT_DIR/CHANGELOG.md"
+if [[ -f "$CHANGELOG" ]]; then
+    python3 - "$CHANGELOG" "$VERSION" "$NOTES_FILE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+changelog = Path(sys.argv[1]).read_text()
+version = sys.argv[2]
+notes_path = Path(sys.argv[3])
+pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)"
+match = re.search(pattern, changelog, flags=re.M | re.S)
+if not match:
+    sys.exit(0)
+section = match.group(1).strip()
+install = f"""
+### Install
+1. Download `Typester-{version}.dmg`
+2. Open the DMG and drag Typester to Applications
+3. If Gatekeeper blocks an unsigned build: Right-click → Open
+
+### Updating
+Already running Typester 1.15.0 or newer? Update from the app itself — menu bar
+icon → Check for Updates… (or Settings → Check for Updates).
+
+When upgrading from 1.15.2 or earlier, complete the Keychain **Always Allow**
+step and re-grant Accessibility for `/Applications/Typester.app`.
+"""
+notes_path.write_text(f"## Typester {version}\n\n{section}\n{install}")
+print(f"Using CHANGELOG.md notes for {version}")
+PY
+fi
+
 if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
     echo "==> Release ${TAG} already exists — uploading/replacing DMG asset..."
     gh release upload "$TAG" "$DMG_PATH" --repo "$GH_REPO" --clobber
