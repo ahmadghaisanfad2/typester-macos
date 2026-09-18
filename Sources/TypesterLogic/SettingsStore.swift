@@ -195,7 +195,9 @@ public class SettingsStore: ObservableObject {
     }
 
     /// Prefer the dictating user’s voice: Apple voice-processing DSP + primary-speaker filter.
-    @Published public var focusOnMyVoice: Bool = true {
+    /// Default off — VP has produced all-zero capture on some Macs/mics (empty “Failed”
+    /// transcripts). Users can re-enable in Settings once their mic path is verified.
+    @Published public var focusOnMyVoice: Bool = false {
         didSet {
             UserDefaults.standard.set(focusOnMyVoice, forKey: focusOnMyVoiceKey)
         }

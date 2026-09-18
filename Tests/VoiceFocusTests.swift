@@ -37,7 +37,7 @@ final class PrimarySpeakerFilterTests: XCTestCase {
 
 final class VoiceFocusConfigTests: XCTestCase {
     override func tearDown() {
-        SettingsStore.shared.focusOnMyVoice = true
+        SettingsStore.shared.focusOnMyVoice = false
         super.tearDown()
     }
 

@@ -47,6 +47,7 @@ public class AudioRecorder {
     private var lifecycle = AudioRecordingLifecycle()
     private var hasInputTap = false
     private var lastLevelEmit: CFAbsoluteTime = 0
+    private var silenceDetector = CaptureSilenceDetector()
     private var engineConfigObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
@@ -373,20 +374,37 @@ public class AudioRecorder {
             }
         }
 
-        let inputFormat = inputNode.outputFormat(forBus: 0)
         if state.wasAbandoned { return nil }
 
+        // Start the engine BEFORE installing the tap. Voice-processing graphs
+        // often rewrite the input node's format at start; tapping the pre-start
+        // format yields all-zero Int16 on some Macs (empty STT → “Failed”).
+        do {
+            Debug.log("Starting audio engine...")
+            try engine.start()
+            Debug.log("Audio engine started successfully")
+        } catch {
+            Debug.log("Audio engine FAILED: \(error.localizedDescription)")
+            return .failed("Failed to start audio engine: \(error.localizedDescription)", dropEngine: true)
+        }
+        if state.wasAbandoned {
+            engine.stop()
+            engine.reset()
+            return nil
+        }
+
+        let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             return .failed("The selected microphone has no usable audio format.", dropEngine: engineIsNew)
         }
 
         let sampleRate = targetRate
-        // Target format: mono PCM Int16 at the provider's required rate
+        // Non-interleaved mono Int16 — `int16ChannelData` is reliable here.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: sampleRate,
             channels: 1,
-            interleaved: true
+            interleaved: false
         ) else {
             return .failed("Failed to create target audio format", dropEngine: engineIsNew)
         }
@@ -404,12 +422,12 @@ public class AudioRecorder {
         // Clear any tap left behind by an interrupted previous session.
         inputNode.removeTap(onBus: 0)
         spectrumAnalyzer.reset()
+        silenceDetector.reset()
         inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
             self.emitAnalysis(from: buffer)
 
-            // Capacity must follow the delivered frameLength (not the requested buffer hint).
             let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * rateRatio) + 64
             guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: max(outCapacity, 1)) else {
                 return
@@ -428,32 +446,28 @@ public class AudioRecorder {
             }
 
             converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
-
-            if error != nil { return }
-
-            if let channelData = outputBuffer.int16ChannelData {
-                let frameLength = Int(outputBuffer.frameLength)
-                let data = Data(bytes: channelData[0], count: frameLength * 2)
-                self.onAudioBuffer?(data)
+            if let error {
+                Debug.log("Audio convert failed: \(error.localizedDescription)")
+                return
             }
-        }
-        if state.wasAbandoned {
-            inputNode.removeTap(onBus: 0)
-            return nil
-        }
 
-        do {
-            Debug.log("Starting audio engine...")
-            try engine.start()
-            Debug.log("Audio engine started successfully")
-        } catch {
-            Debug.log("Audio engine FAILED: \(error.localizedDescription)")
-            // The failed engine is likely poisoned (stale device/format after
-            // wake). Discard it so the next attempt builds a fresh one.
-            return .failed("Failed to start audio engine: \(error.localizedDescription)", dropEngine: true)
+            guard let pcm = Self.int16PCMData(from: outputBuffer), !pcm.isEmpty else {
+                Debug.log("Audio convert produced no Int16 PCM (format=\(targetFormat))")
+                return
+            }
+
+            if self.silenceDetector.observe(pcm16: pcm) {
+                Debug.log("Mic path is delivering sustained digital silence after convert")
+                DispatchQueue.main.async { [weak self] in
+                    self?.onError?(
+                        "The microphone is sending silence. Turn off Settings → Dictation → Focus on my voice, then dictate again."
+                    )
+                }
+            }
+
+            self.onAudioBuffer?(pcm)
         }
         if state.wasAbandoned {
-            // The watchdog gave up on us mid-start; shut back down quietly.
             inputNode.removeTap(onBus: 0)
             engine.stop()
             engine.reset()
@@ -461,6 +475,22 @@ public class AudioRecorder {
         }
 
         return .started(engine: engine, inputNode: inputNode, engineIsNew: engineIsNew)
+    }
+
+    /// Extracts mono Int16 PCM from a converter output buffer.
+    static func int16PCMData(from buffer: AVAudioPCMBuffer) -> Data? {
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return Data() }
+
+        if let channelData = buffer.int16ChannelData {
+            return Data(bytes: channelData[0], count: frames * 2)
+        }
+
+        let abl = buffer.audioBufferList.pointee
+        guard let bytes = abl.mBuffers.mData else { return nil }
+        let bytesPerFrame = Int(buffer.format.streamDescription.pointee.mBytesPerFrame)
+        guard bytesPerFrame > 0 else { return nil }
+        return Data(bytes: bytes, count: frames * bytesPerFrame)
     }
 
     private func handleStartOutcome(_ outcome: StartOutcome) {
