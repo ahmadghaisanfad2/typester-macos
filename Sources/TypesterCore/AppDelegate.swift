@@ -1787,6 +1787,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.subtitleOverlay.updateSpectrum(bands)
         }
 
+        audioRecorder.onAudioLevel = { [weak self] level in
+            self?.subtitleOverlay.updateLevel(level)
+            FloatingDictationPill.shared.setLevel(level)
+        }
+
         audioRecorder.onError = { [weak self] _ in
             self?.stopRecording()
         }
