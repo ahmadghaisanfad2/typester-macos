@@ -10,7 +10,7 @@ private extension NSLock {
 
 /// Result of parsing an STT response message.
 public enum STTParseResult {
-    case transcript(text: String, isFinal: Bool)
+    case transcript(text: String, isFinal: Bool, speaker: String?)
     case endpoint
     /// A provider acknowledged that a finalize request flushed pending audio.
     /// The provider may still need to close its stream after this event.
@@ -19,6 +19,11 @@ public enum STTParseResult {
     case error(String)
     case finished
     case none
+
+    /// Convenience for providers without speaker labels.
+    public static func transcript(text: String, isFinal: Bool) -> STTParseResult {
+        .transcript(text: text, isFinal: isFinal, speaker: nil)
+    }
 }
 
 /// Protocol for STT client configuration - each provider implements this.
@@ -61,6 +66,8 @@ public class STTClientBase: NSObject, STTProvider {
     private var isIntentionalDisconnect = false
     private var didNotifyDisconnect = false
     private var connectionReady = false
+    /// Locks transcripts to the first labeled speaker when Focus on my voice is on.
+    private let primarySpeakerFilter = PrimarySpeakerFilter()
 
     private struct OutgoingMessage {
         let id: UUID
@@ -133,6 +140,7 @@ public class STTClientBase: NSObject, STTProvider {
         }
 
         disconnect()
+        primarySpeakerFilter.reset()
 
         let task = Self.session.webSocketTask(with: request)
         let generation = stateLock.withLock { () -> UInt in
@@ -454,10 +462,14 @@ public class STTClientBase: NSObject, STTProvider {
         var finalBatch = ""
         var interimBatch = ""
         var otherResults: [STTParseResult] = []
+        let filterSpeakers = SettingsStore.shared.focusOnMyVoice
 
         for result in results {
             switch result {
-            case .transcript(let text, let isFinal):
+            case .transcript(let text, let isFinal, let speaker):
+                if filterSpeakers, !primarySpeakerFilter.shouldInclude(speaker: speaker) {
+                    continue
+                }
                 if isFinal {
                     finalBatch += text
                 } else {

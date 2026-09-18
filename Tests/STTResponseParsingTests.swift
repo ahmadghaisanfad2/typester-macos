@@ -16,7 +16,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "Hello")
             XCTAssertTrue(isFinal)
         } else {
@@ -137,7 +137,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "partial")
             XCTAssertFalse(isFinal)
         } else {
@@ -157,13 +157,13 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 2)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "Hello")
             XCTAssertTrue(isFinal)
         } else {
             XCTFail("Expected final transcript")
         }
-        if case .transcript(let text, let isFinal) = results[1] {
+        if case .transcript(let text, let isFinal, _) = results[1] {
             XCTAssertEqual(text, " world")
             XCTAssertFalse(isFinal)
         } else {
@@ -188,7 +188,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "Hello world")
             XCTAssertTrue(isFinal)
         } else {
@@ -312,7 +312,7 @@ final class STTResponseParsingTests: XCTestCase {
 
         XCTAssertEqual(results.count, 2)
         XCTAssertTrue(results.contains { result in
-            if case .transcript(let text, true) = result { return text == "last words" }
+            if case .transcript(let text, true, _) = result { return text == "last words" }
             return false
         })
         XCTAssertTrue(results.contains { result in
@@ -347,7 +347,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "partial")
             XCTAssertFalse(isFinal)
         } else {
@@ -367,7 +367,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "Hello")
             XCTAssertFalse(isFinal)
         } else {
@@ -385,7 +385,7 @@ final class STTResponseParsingTests: XCTestCase {
         let results = config.parseResponse(json)
 
         XCTAssertEqual(results.count, 1)
-        if case .transcript(let text, let isFinal) = results[0] {
+        if case .transcript(let text, let isFinal, _) = results[0] {
             XCTAssertEqual(text, "Hello, how are you?")
             XCTAssertTrue(isFinal)
         } else {

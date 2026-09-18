@@ -37,13 +37,13 @@ public struct OpenAIConnectionConfig: STTConnectionConfig {
 
         case "conversation.item.input_audio_transcription.delta":
             if let delta = json["delta"] as? String, !delta.isEmpty {
-                return [.transcript(text: delta, isFinal: false)]
+                return [.transcript(text: delta, isFinal: false, speaker: nil)]
             }
             return []
 
         case "conversation.item.input_audio_transcription.completed":
             if let transcript = json["transcript"] as? String, !transcript.isEmpty {
-                return [.transcript(text: transcript, isFinal: true)]
+                return [.transcript(text: transcript, isFinal: true, speaker: nil)]
             }
             return []
 
@@ -219,7 +219,7 @@ public class OpenAIClient: STTClientBase {
 
         for result in results {
             switch result {
-            case .transcript(let text, let isFinal):
+            case .transcript(let text, let isFinal, _):
                 if isFinal {
                     interimAccumulator = ""
                     // Ensure space between turns when pasting on pause.

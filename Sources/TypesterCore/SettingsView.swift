@@ -541,6 +541,41 @@ struct SettingsView: View {
             }
 
             SettingsSection(
+                "Voice focus",
+                footer: voiceFocusFooter
+            ) {
+                SettingsRow(
+                    "Focus on my voice",
+                    help: "Reduce other people’s speech in dictation. Uses Apple voice-processing on the mic path and, on Soniox/Deepgram, keeps only the first speaker after you start dictating.",
+                    showsDivider: true
+                ) {
+                    Toggle("", isOn: $settings.focusOnMyVoice)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(Codex.green)
+                }
+
+                if settings.focusOnMyVoice {
+                    SettingsRow(
+                        "macOS mic mode",
+                        help: "Voice Isolation in Control Center works best. Typester cannot turn it on for you.",
+                        showsDivider: false
+                    ) {
+                        HStack(spacing: 10) {
+                            Text(activeMicrophoneModeLabel)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.7))
+                            Button("Open Mic Modes…") {
+                                AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+                            }
+                            .buttonStyle(.link)
+                            .font(.system(size: 12))
+                        }
+                    }
+                }
+            }
+
+            SettingsSection(
                 "Floating pill",
                 footer: "A small always-on-top pill you can click to start or stop dictation — similar to Wispr Flow. Drag it anywhere on screen."
             ) {
@@ -1099,6 +1134,22 @@ struct SettingsView: View {
         }
         let modifiers = NSEvent.ModifierFlags(rawValue: keys.modifiers)
         return KeyboardUtils.formatShortcutDisplay(modifiers: modifiers, keyCode: keys.keyCode)
+    }
+
+    private var voiceFocusFooter: String {
+        "On (recommended): apply Apple voice-processing to the mic path. Soniox and Deepgram also diarize and keep only the first speaker after you start dictating. Best results when macOS mic mode is Voice Isolation."
+    }
+
+    private var activeMicrophoneModeLabel: String {
+        if #available(macOS 12.0, *) {
+            switch AVCaptureDevice.activeMicrophoneMode {
+            case .voiceIsolation: return "Voice Isolation"
+            case .wideSpectrum: return "Wide Spectrum"
+            case .standard: return "Standard"
+            @unknown default: return "Unknown"
+            }
+        }
+        return "Standard"
     }
 
     private func checkMicPermission() {

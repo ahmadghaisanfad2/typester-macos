@@ -543,6 +543,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if desired == .regular {
             setAppIcon()
         }
+        // Policy flips can re-pin HUD windows to an old Space; ask overlays to reassert.
+        SpaceFollowingWindow.notifyActivationPolicyDidChange()
     }
 
     private func updateSTTProvider() {

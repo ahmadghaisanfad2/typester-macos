@@ -7,7 +7,8 @@ public enum SonioxRealtimeSessionConfig {
         model: String,
         pasteOnPause: Bool,
         languageHints: [String],
-        context: [String: Any]?
+        context: [String: Any]?,
+        focusOnMyVoice: Bool = false
     ) -> [String: Any] {
         var config: [String: Any] = [
             "api_key": apiKey,
@@ -26,6 +27,10 @@ public enum SonioxRealtimeSessionConfig {
             config["max_endpoint_delay_ms"] = 3000
         } else {
             config["enable_endpoint_detection"] = false
+        }
+
+        if focusOnMyVoice {
+            config["enable_speaker_diarization"] = true
         }
 
         if !languageHints.isEmpty {
@@ -78,7 +83,8 @@ public struct SonioxConnectionConfig: STTConnectionConfig {
                 }
 
                 let isFinal = token["is_final"] as? Bool ?? false
-                results.append(.transcript(text: tokenText, isFinal: isFinal))
+                let speaker = token["speaker"] as? String
+                results.append(.transcript(text: tokenText, isFinal: isFinal, speaker: speaker))
             }
         }
 
@@ -113,7 +119,8 @@ public class SonioxClient: STTClientBase {
             model: STTProviderType.soniox.modelID,
             pasteOnPause: SettingsStore.shared.pasteOnPause,
             languageHints: SettingsStore.shared.languageHints,
-            context: SettingsStore.shared.sonioxContext()
+            context: SettingsStore.shared.sonioxContext(),
+            focusOnMyVoice: SettingsStore.shared.focusOnMyVoice
         )
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),

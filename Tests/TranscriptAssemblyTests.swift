@@ -9,8 +9,8 @@ final class TranscriptAssemblyTests: XCTestCase {
             if isFinal { finals.append(text) }
         }
 
-        client.routeParseResults([.transcript(text: "first ", isFinal: true)])
-        client.routeParseResults([.transcript(text: "second", isFinal: true)])
+        client.routeParseResults([.transcript(text: "first ", isFinal: true, speaker: nil)])
+        client.routeParseResults([.transcript(text: "second", isFinal: true, speaker: nil)])
 
         XCTAssertEqual(finals, ["first ", "second"])
     }
