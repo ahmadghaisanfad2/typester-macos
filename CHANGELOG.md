@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.22.2] — 2026-09-18
+
+### Fixed
+- **Voice glow stays inside the capsule.** Ported the refined in-capsule glow from `feature/voice-glow`: the colorful gradient paints the pill/caption body (clipped by the capsule), and transcribing shows a border beam on the capsule edges — not a bloom floating outside the plate.
+- **Dictation HUDs stay on every macOS Space.** HUD `collectionBehavior` uses `.canJoinAllSpaces` + `.fullScreenAuxiliary` + `.ignoresCycle` (no `.moveToActiveSpace`), so AppKit will not abort and overlays remain visible across Spaces.
+
+### Notes
+- Stable-signed 1.22.2 keeps Accessibility / Microphone grants from earlier stable builds.
+- Install from the DMG or **Check for Updates…**.
+
 ## [1.22.1] — 2026-09-18
 
 ### Fixed
