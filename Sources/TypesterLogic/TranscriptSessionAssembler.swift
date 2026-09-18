@@ -19,6 +19,11 @@ public final class TranscriptSessionAssembler {
 
     public func appendFinal(_ text: String) {
         guard !text.isEmpty else { return }
+        // Speaker-filtered provider spans may omit padding; join with a space
+        // when neither side already has one so pasted words never glue.
+        if !finalText.isEmpty, !finalText.hasSuffix(" "), !text.hasPrefix(" ") {
+            finalText += " "
+        }
         finalText += text
         interimText = ""
     }

@@ -87,6 +87,9 @@ class SubtitleViewModel: ObservableObject {
 
     func updateFinal(_ text: String) {
         guard showStreamPreview, !isProcessing else { return }
+        if !finalText.isEmpty, !text.isEmpty, !finalText.hasSuffix(" "), !text.hasPrefix(" ") {
+            finalText += " "
+        }
         finalText += text
         interimText = ""
     }

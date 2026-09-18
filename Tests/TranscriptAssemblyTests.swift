@@ -33,6 +33,24 @@ final class TranscriptAssemblyTests: XCTestCase {
         XCTAssertEqual(assembler.resolvedText, "The first few words continue after the pause")
     }
 
+    func testAppendFinalInsertsSpaceBetweenUnpaddedDeltas() {
+        let assembler = TranscriptSessionAssembler()
+
+        assembler.appendFinal("hello world")
+        assembler.appendFinal("again mine")
+
+        XCTAssertEqual(assembler.finalText, "hello world again mine")
+    }
+
+    func testAppendFinalDoesNotDoubleSpaceWhenProviderPads() {
+        let assembler = TranscriptSessionAssembler()
+
+        assembler.appendFinal("hello ")
+        assembler.appendFinal("world")
+
+        XCTAssertEqual(assembler.finalText, "hello world")
+    }
+
     func testInterimIsReplacedAndFinalClearsInterim() {
         let assembler = TranscriptSessionAssembler()
 
