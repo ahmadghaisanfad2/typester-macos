@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.22.3] — 2026-09-18
+
+### Fixed
+- **Transcriptions no longer fail with empty “Failed · App” history.** Failed sessions were recording **digital silence** (RMS 0) on the mic path when **Focus on my voice** (Apple voice-processing DSP) was on. The audio engine now starts *before* the input tap is installed (VP rewrites the format at start), converts to non-interleaved Int16, and surfaces a clear error if silence persists.
+- **Focus on my voice defaults to off.** Re-enable it in Settings → Dictation after a successful dictate if you want DSP + primary-speaker filtering.
+
+### Notes
+- Stable-signed 1.22.3 keeps Accessibility / Microphone grants.
+- If you still see Failed history entries, check Settings → Dictation → Focus on my voice is off, then dictate again.
+
 ## [1.22.2] — 2026-09-18
 
 ### Fixed
