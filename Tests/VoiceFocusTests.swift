@@ -154,8 +154,30 @@ final class VoiceFocusConfigTests: XCTestCase {
             .transcript(text: "again", isFinal: true, speaker: "1")
         ])
 
-        // Soniox concatenates; filter skip still inserts a boundary space.
+        // Soniox concatenates; the kept left span is padded, so no extra space.
         XCTAssertEqual(finals, ["mine again"])
+    }
+
+    func testRouteParseResultsDoesNotSplitSonioxSubwordsAfterFiltering() {
+        let previous = SettingsStore.shared.focusOnMyVoice
+        SettingsStore.shared.focusOnMyVoice = true
+        defer { SettingsStore.shared.focusOnMyVoice = previous }
+
+        let client = SonioxClient()
+        var finals: [String] = []
+        client.onTranscript = { text, isFinal in
+            if isFinal { finals.append(text) }
+        }
+
+        // A dropped (background) token sits mid-word; concatenation must not
+        // inject a space into the kept word.
+        client.routeParseResults([
+            .transcript(text: "wel", isFinal: true, speaker: "1"),
+            .transcript(text: "x", isFinal: true, speaker: "2"),
+            .transcript(text: "come", isFinal: true, speaker: "1")
+        ])
+
+        XCTAssertEqual(finals, ["welcome"])
     }
 
     func testRouteParseResultsKeepsAllWhenFocusOff() {

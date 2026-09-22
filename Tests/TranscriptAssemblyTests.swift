@@ -72,6 +72,20 @@ final class TranscriptAssemblyTests: XCTestCase {
 
         XCTAssertEqual(assembler.resolvedText, "new session")
     }
+
+    func testAssemblerJoinStyleCanBeUpdated() {
+        let assembler = TranscriptSessionAssembler(joinStyle: .spaceBetweenUnpadded)
+        assembler.appendFinal("hello world")
+        assembler.appendFinal("again mine")
+        XCTAssertEqual(assembler.finalText, "hello world again mine")
+
+        assembler.reset()
+        assembler.updateJoinStyle(.concatenate)
+        assembler.appendFinal("Hel")
+        assembler.appendFinal("lo")
+
+        XCTAssertEqual(assembler.finalText, "Hello")
+    }
 }
 
 private final class FinalizeProbeClient: STTClientBase {

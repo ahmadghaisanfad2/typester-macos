@@ -20,14 +20,31 @@ final class TranscriptJoinPolicyTests: XCTestCase {
         )
     }
 
-    func testFilterSkipAlwaysEnsuresBoundarySpace() {
+    func testFilterSkipEnsuresBoundarySpaceForUnpaddedStyles() {
         XCTAssertEqual(
-            TranscriptJoinPolicy.joinAcrossFilterSkip(left: "hello world", right: "again mine"),
+            TranscriptJoinPolicy.joinAcrossFilterSkip(
+                left: "hello world", right: "again mine", style: .spaceBetweenUnpadded
+            ),
             "hello world again mine"
         )
         XCTAssertEqual(
-            TranscriptJoinPolicy.joinAcrossFilterSkip(left: "mine ", right: "again"),
+            TranscriptJoinPolicy.joinAcrossFilterSkip(
+                left: "mine ", right: "again", style: .spaceBetweenUnpadded
+            ),
             "mine again"
+        )
+    }
+
+    func testFilterSkipDoesNotSplitConcatenateTokens() {
+        // Soniox sub-word tokens interruptible by a dropped (background) token
+        // must never gain a forced space mid-word.
+        XCTAssertEqual(
+            TranscriptJoinPolicy.joinAcrossFilterSkip(left: "He", right: "y,", style: .concatenate),
+            "Hey,"
+        )
+        XCTAssertEqual(
+            TranscriptJoinPolicy.joinAcrossFilterSkip(left: "wel", right: "come", style: .concatenate),
+            "welcome"
         )
     }
 

@@ -2,6 +2,15 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.22.5] — 2026-09-22
+
+### Fixed
+- **Words are no longer split apart (`wel come`) in the pasted transcript or the live pill.** The 1.22.4 fix made Soniox token joining provider-aware, but two hardcoded "insert a space" paths were missed: tokens kept after a **Focus on my voice** speaker-filter skip still got a forced boundary space, and the floating pill still used its own space-between heuristic. Both now follow the provider's join policy — Soniox concatenates tokens as-is; Deepgram-style unpadded spans still get a boundary space.
+- **Switching STT providers mid-session no longer keeps the old join style.** The session assembler's join style is re-synced whenever the provider changes (and at the start of each dictation), so dictating on Soniox after launching on another provider can no longer space-split words.
+
+### Notes
+- Dictate a short line with **Focus on my voice** on — history and the pill should show normal words.
+
 ## [1.22.4] — 2026-09-18
 
 ### Fixed
