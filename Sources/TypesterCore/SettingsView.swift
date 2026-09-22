@@ -49,6 +49,8 @@ struct SettingsView: View {
     @State private var showDeepgramKey = false
     @State private var showOpenAIKey = false
     @State private var showOpenRouterKey = false
+    @State private var xaiKeyInput: String = ""
+    @State private var showXaiKey = false
     @ObservedObject private var openRouterModels = OpenRouterModelsStore.shared
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
@@ -89,6 +91,9 @@ struct SettingsView: View {
             }
             if let key = settings.openrouterApiKey {
                 openrouterKeyInput = key
+            }
+            if let key = settings.xaiApiKey {
+                xaiKeyInput = key
             }
             if let pane = ProcessInfo.processInfo.environment["TYPESTER_PANE"],
                let parsed = SettingsPane(rawValue: pane) {
@@ -359,6 +364,35 @@ struct SettingsView: View {
             }
         case .openrouter:
             openRouterModelRow
+        case .xai:
+            xaiModelRow
+        }
+    }
+
+    private var xaiModelRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Picker("Mode", selection: $settings.xaiMode) {
+                    ForEach(XaiTranscribeMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+
+                Spacer()
+
+                Text(settings.xaiMode.modelID)
+                    .font(.mono(11))
+                    .foregroundStyle(Codex.textTertiary)
+            }
+
+            Text(settings.xaiMode == .realtime
+                 ? "Real-time streams live text while you speak."
+                 : "Async records locally, then transcribes after you stop (no live text).")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Codex.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -426,6 +460,8 @@ struct SettingsView: View {
                 return ($openaiKeyInput, $showOpenAIKey, settings.openaiApiKey, { settings.openaiApiKey = $0 }, URL(string: "https://platform.openai.com/api-keys")!)
             case .openrouter:
                 return ($openrouterKeyInput, $showOpenRouterKey, settings.openrouterApiKey, { settings.openrouterApiKey = $0 }, URL(string: "https://openrouter.ai/keys")!)
+            case .xai:
+                return ($xaiKeyInput, $showXaiKey, settings.xaiApiKey, { settings.xaiApiKey = $0 }, URL(string: "https://console.x.ai/team/default/api-keys")!)
             }
         }()
 
@@ -644,6 +680,25 @@ struct SettingsView: View {
                     }
                     .padding(14)
                 }
+            } else if settings.sttProvider == .xai {
+                SettingsSection("xAI behavior") {
+                    HStack(spacing: 10) {
+                        Image(systemName: "info")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Codex.textTertiary)
+                            .frame(width: 17)
+
+                        Text("Dictionary terms are sent to xAI as key-term hints. Domain and topic are not used by xAI.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Codex.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                }
+
+                dictionaryTermsSection
             } else {
                 SettingsSection(
                     "Context",
@@ -747,6 +802,8 @@ struct SettingsView: View {
             return "Words are replaced locally before paste. Deepgram does not receive dictionary hints."
         case .openrouter:
             return "Words are replaced locally before paste. OpenRouter transcription does not receive dictionary hints."
+        case .xai:
+            return "Words are replaced locally before paste; correct terms are also sent to xAI as key-term hints."
         }
     }
 

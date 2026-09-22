@@ -35,6 +35,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return OpenAIClient()
         case .openrouter:
             return OpenRouterClient()
+        case .xai:
+            switch SettingsStore.shared.xaiMode {
+            case .realtime:
+                return XaiClient()
+            case .async:
+                return XaiAsyncClient()
+            }
         }
     }
 
@@ -344,6 +351,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return SettingsStore.shared.openaiApiKey != nil
         case .openrouter:
             return SettingsStore.shared.openrouterApiKey != nil
+        case .xai:
+            return SettingsStore.shared.xaiApiKey != nil
         }
     }
 
@@ -565,6 +574,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if sttProvider is OpenAIClient { return }
         case .openrouter:
             if sttProvider is OpenRouterClient { return }
+        case .xai:
+            switch SettingsStore.shared.xaiMode {
+            case .realtime:
+                if sttProvider is XaiClient { return }
+            case .async:
+                if sttProvider is XaiAsyncClient { return }
+            }
         }
 
         // Disconnect old provider
@@ -1111,10 +1127,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         micMenuItem.submenu = micMenu
         menu.addItem(micMenuItem)
 
-        // Languages submenu (Soniox / OpenAI / OpenRouter; Deepgram auto-detects)
+        // Languages submenu (Soniox / OpenAI / OpenRouter / xAI; Deepgram auto-detects)
         if SettingsStore.shared.sttProvider == .soniox
             || SettingsStore.shared.sttProvider == .openai
-            || SettingsStore.shared.sttProvider == .openrouter {
+            || SettingsStore.shared.sttProvider == .openrouter
+            || SettingsStore.shared.sttProvider == .xai {
             let langMenu = NSMenu()
             let selectedLangs = Set(SettingsStore.shared.languageHints)
 
@@ -1519,8 +1536,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func replayPCM(_ pcm: Data, sampleRate: Double) {
-        // Async Soniox uploads one buffer — skip chunked realtime replay.
-        if sttProvider is SonioxAsyncClient {
+        // Async Soniox / xAI upload one buffer — skip chunked realtime replay.
+        if sttProvider is SonioxAsyncClient || sttProvider is XaiAsyncClient {
             sttProvider.sendAudio(pcm)
             sttProvider.sendFinalize()
             return

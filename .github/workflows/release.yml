@@ -63,9 +63,9 @@ jobs:
           ## Typester ${VERSION}
 
           ### What's new
-          - **OpenRouter STT provider** — dictate through OpenRouter with your own API key
-          - **Live transcription model catalog** — models load from OpenRouter and refresh automatically
-          - Batch transcription after you stop (same UX as Soniox Async)
+          - **xAI (Grok) STT provider** — dictate through xAI with your own API key
+          - **Real-time or async modes** — stream live text over the xAI WebSocket, or batch-transcribe after you stop
+          - Live interim text, paste-on-pause, and speaker diarization for Focus on my voice
 
           ### Install
           1. Download \`Typester-${VERSION}.dmg\`

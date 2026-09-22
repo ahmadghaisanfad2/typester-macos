@@ -2,6 +2,17 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.23.0] — 2026-09-22
+
+### Added
+- **xAI (Grok) speech-to-text provider.** Pick **xAI** in Settings or onboarding and choose a mode:
+  - **Real-time** streams live text over the xAI WebSocket (`wss://api.x.ai/v1/stt`) with interim results, paste-on-pause, and speaker diarization for **Focus on my voice**.
+  - **Async** records locally and uploads a WAV to `POST https://api.x.ai/v1/stt` after you stop (no live text, paste-on-pause disabled).
+  - Uses the `grok-voice-transcribe-2` model. Dictionary terms are sent as `keyterm` hints, and a language hint enables text formatting.
+
+### Notes
+- Add your xAI API key from [console.x.ai](https://console.x.ai/team/default/api-keys) in Settings → xAI; it is stored in the macOS Keychain.
+
 ## [1.22.5] — 2026-09-22
 
 ### Fixed

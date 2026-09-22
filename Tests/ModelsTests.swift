@@ -171,6 +171,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.deepgram.rawValue, "deepgram")
         XCTAssertEqual(STTProviderType.openai.rawValue, "openai")
         XCTAssertEqual(STTProviderType.openrouter.rawValue, "openrouter")
+        XCTAssertEqual(STTProviderType.xai.rawValue, "xai")
     }
 
     func testSTTProviderTypeDisplayName() {
@@ -178,6 +179,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.deepgram.displayName, "Deepgram")
         XCTAssertEqual(STTProviderType.openai.displayName, "OpenAI")
         XCTAssertEqual(STTProviderType.openrouter.displayName, "OpenRouter")
+        XCTAssertEqual(STTProviderType.xai.displayName, "xAI")
     }
 
     func testSTTProviderTypeModelID() {
@@ -187,6 +189,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
         XCTAssertEqual(STTProviderType.openrouter.modelID, SettingsStore.shared.openrouterModelID)
+        XCTAssertEqual(STTProviderType.xai.modelID, "grok-voice-transcribe-2")
     }
 
     func testSTTProviderTypeAudioSampleRate() {
@@ -194,6 +197,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.deepgram.audioSampleRate, 16_000)
         XCTAssertEqual(STTProviderType.openai.audioSampleRate, 24_000)
         XCTAssertEqual(STTProviderType.openrouter.audioSampleRate, 16_000)
+        XCTAssertEqual(STTProviderType.xai.audioSampleRate, 16_000)
     }
 
     func testSTTProviderTypeCodable() throws {
@@ -207,24 +211,51 @@ final class ModelsTests: XCTestCase {
 
     func testSTTProviderTypeAllCases() {
         let allCases = STTProviderType.allCases
-        XCTAssertEqual(allCases.count, 4)
+        XCTAssertEqual(allCases.count, 5)
         XCTAssertTrue(allCases.contains(.soniox))
         XCTAssertTrue(allCases.contains(.deepgram))
         XCTAssertTrue(allCases.contains(.openai))
         XCTAssertTrue(allCases.contains(.openrouter))
+        XCTAssertTrue(allCases.contains(.xai))
     }
 
     func testSTTProviderTypeIsBatchTranscription() {
         let previousMode = SettingsStore.shared.sonioxMode
-        defer { SettingsStore.shared.sonioxMode = previousMode }
+        let previousXaiMode = SettingsStore.shared.xaiMode
+        defer {
+            SettingsStore.shared.sonioxMode = previousMode
+            SettingsStore.shared.xaiMode = previousXaiMode
+        }
 
         SettingsStore.shared.sonioxMode = .realtime
+        SettingsStore.shared.xaiMode = .realtime
         XCTAssertFalse(STTProviderType.soniox.isBatchTranscription)
+        XCTAssertFalse(STTProviderType.xai.isBatchTranscription)
         SettingsStore.shared.sonioxMode = .async
+        SettingsStore.shared.xaiMode = .async
         XCTAssertTrue(STTProviderType.soniox.isBatchTranscription)
+        XCTAssertTrue(STTProviderType.xai.isBatchTranscription)
         XCTAssertFalse(STTProviderType.deepgram.isBatchTranscription)
         XCTAssertFalse(STTProviderType.openai.isBatchTranscription)
         XCTAssertTrue(STTProviderType.openrouter.isBatchTranscription)
+    }
+
+    // MARK: - XaiTranscribeMode tests
+
+    func testXaiTranscribeModeRawValues() {
+        XCTAssertEqual(XaiTranscribeMode.realtime.rawValue, "realtime")
+        XCTAssertEqual(XaiTranscribeMode.async.rawValue, "async")
+    }
+
+    func testXaiTranscribeModeAllCases() {
+        XCTAssertEqual(XaiTranscribeMode.allCases.count, 2)
+        XCTAssertTrue(XaiTranscribeMode.allCases.contains(.realtime))
+        XCTAssertTrue(XaiTranscribeMode.allCases.contains(.async))
+    }
+
+    func testXaiTranscribeModeModelID() {
+        XCTAssertEqual(XaiTranscribeMode.realtime.modelID, "grok-voice-transcribe-2")
+        XCTAssertEqual(XaiTranscribeMode.async.modelID, "grok-voice-transcribe-2")
     }
 
     // MARK: - OpenAITranscribeModel tests
