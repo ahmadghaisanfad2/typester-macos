@@ -547,6 +547,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func updateSTTProvider() {
+        // Keep the assembler's join style aligned with the active provider even
+        // though the assembler is created once at launch.
+        transcriptAssembler.updateJoinStyle(SettingsStore.shared.sttProvider.transcriptJoinStyle)
+
         switch SettingsStore.shared.sttProvider {
         case .soniox:
             switch SettingsStore.shared.sonioxMode {
@@ -1868,6 +1872,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         uncommittedAudioPCM.clear()
         sessionPastedText = ""
         sessionSampleRate = SettingsStore.shared.sttProvider.audioSampleRate
+        transcriptAssembler.updateJoinStyle(SettingsStore.shared.sttProvider.transcriptJoinStyle)
         rebuildMenu()
 
         FeedbackSoundPlayer.playStart()

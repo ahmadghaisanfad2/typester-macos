@@ -20,6 +20,11 @@ public final class TranscriptSessionAssembler {
         interimText = ""
     }
 
+    /// Updates the join style when the active provider changes at runtime.
+    public func updateJoinStyle(_ style: TranscriptTokenJoinStyle) {
+        joinStyle = style
+    }
+
     public func appendFinal(_ text: String) {
         guard !text.isEmpty else { return }
         finalText = TranscriptJoinPolicy.join(left: finalText, right: text, style: joinStyle)

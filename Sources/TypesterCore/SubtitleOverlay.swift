@@ -37,8 +37,16 @@ class SubtitleViewModel: ObservableObject {
         !finalText.isEmpty || !interimText.isEmpty
     }
 
+    /// Join style for finalized deltas, matching the active provider. Soniox
+    /// tokens carry their own word-boundary spacing; Deepgram spans do not.
+    private var joinStyle: TranscriptTokenJoinStyle {
+        SettingsStore.shared.sttProvider.transcriptJoinStyle
+    }
+
     /// Space between finalized and interim text so words never glue together.
+    /// Concatenate providers already carry their own spacing.
     var interimJoiner: String? {
+        guard joinStyle == .spaceBetweenUnpadded else { return nil }
         guard !finalText.isEmpty, !interimText.isEmpty,
               !finalText.hasSuffix(" "), !interimText.hasPrefix(" ") else { return nil }
         return " "
@@ -93,10 +101,7 @@ class SubtitleViewModel: ObservableObject {
 
     func updateFinal(_ text: String) {
         guard showStreamPreview, !isProcessing else { return }
-        if !finalText.isEmpty, !text.isEmpty, !finalText.hasSuffix(" "), !text.hasPrefix(" ") {
-            finalText += " "
-        }
-        finalText += text
+        finalText = TranscriptJoinPolicy.join(left: finalText, right: text, style: joinStyle)
         interimText = ""
     }
 

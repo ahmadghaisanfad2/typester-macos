@@ -486,7 +486,11 @@ public class STTClientBase: NSObject, STTProvider {
                 if isFinal {
                     if !finalBatch.isEmpty {
                         if skippedFinal {
-                            finalBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(left: finalBatch, right: text)
+                            finalBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(
+                                left: finalBatch,
+                                right: text,
+                                style: joinStyle
+                            )
                         } else {
                             finalBatch = TranscriptJoinPolicy.join(left: finalBatch, right: text, style: joinStyle)
                         }
@@ -497,7 +501,11 @@ public class STTClientBase: NSObject, STTProvider {
                 } else {
                     if !interimBatch.isEmpty {
                         if skippedInterim {
-                            interimBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(left: interimBatch, right: text)
+                            interimBatch = TranscriptJoinPolicy.joinAcrossFilterSkip(
+                                left: interimBatch,
+                                right: text,
+                                style: joinStyle
+                            )
                         } else {
                             interimBatch = TranscriptJoinPolicy.join(left: interimBatch, right: text, style: joinStyle)
                         }
