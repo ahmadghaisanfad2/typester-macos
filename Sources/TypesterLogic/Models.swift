@@ -1,6 +1,6 @@
 import Cocoa
 
-public let appVersion = "1.22.5"
+public let appVersion = "1.23.0"
 
 public enum CorrectionSource: String, Codable, Equatable {
     case taught
