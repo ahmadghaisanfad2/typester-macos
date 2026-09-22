@@ -438,6 +438,7 @@ struct OnboardingView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                .help("Real-time transcription costs more than Async.")
             } else if settings.sttProvider == .openrouter {
                 HStack(spacing: 8) {
                     Picker("Model", selection: $settings.openrouterModelID) {
@@ -465,6 +466,7 @@ struct OnboardingView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                .help("Real-time transcription costs more than Async.")
             }
         }
     }

@@ -19,7 +19,7 @@ Features:
 - **Floating pill** — Optional Wispr-style always-on-top pill: click to start/stop dictation, drag it anywhere
 - **Cancel with Esc** — Press Escape while dictating to discard the transcript without pasting
 - **Filler-word cleanup** — Optional removal of hesitation fillers (uh, um, you know, I mean…) before paste
-- **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); xAI offers real-time WebSocket or async batch modes (`grok-voice-transcribe-2`); OpenRouter uses batch transcription with a live model catalog
+- **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); xAI offers real-time WebSocket or async batch modes (`grok-voice-transcribe-2.0`); OpenRouter uses batch transcription with a live model catalog
 - **OpenAI model picker** — Select `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`
 - **Multilingual** — Soniox/OpenAI/xAI: language hints; Deepgram: auto-detects with multilingual model
 - **Microphone selection** — Choose your preferred input device from the menu

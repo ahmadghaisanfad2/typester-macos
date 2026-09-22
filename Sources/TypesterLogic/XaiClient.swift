@@ -4,8 +4,8 @@ import Foundation
 public enum XaiAPI {
     public static let baseURL = URL(string: "https://api.x.ai")!
     public static let webSocketURL = "wss://api.x.ai/v1/stt"
-    /// Server default model. The WebSocket route takes no model parameter.
-    public static let modelID = "grok-voice-transcribe-2"
+    /// Speech-to-text model used by both the batch and streaming routes.
+    public static let modelID = "grok-voice-transcribe-2.0"
     public static let sampleRate = 16_000
     public static let keytermLimit = 100
     public static let keytermMaxLength = 50
@@ -21,6 +21,7 @@ public enum XaiAPI {
         keyterms: [String]
     ) -> [URLQueryItem] {
         var items: [URLQueryItem] = [
+            URLQueryItem(name: "model", value: modelID),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
             URLQueryItem(name: "encoding", value: "pcm"),
             URLQueryItem(name: "interim_results", value: "true")

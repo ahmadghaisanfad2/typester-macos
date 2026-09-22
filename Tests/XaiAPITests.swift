@@ -6,6 +6,7 @@ final class XaiAPITests: XCTestCase {
         let items = XaiAPI.makeQueryItems(language: nil, focusOnMyVoice: false, keyterms: [])
         let map = Dictionary(grouping: items, by: \.name).compactMapValues { $0.first?.value }
 
+        XCTAssertEqual(map["model"], "grok-voice-transcribe-2.0")
         XCTAssertEqual(map["sample_rate"], "16000")
         XCTAssertEqual(map["encoding"], "pcm")
         XCTAssertEqual(map["interim_results"], "true")
@@ -45,7 +46,7 @@ final class XaiAPITests: XCTestCase {
         let boundary = "Boundary-Test"
         let body = XaiAPI.makeMultipartBody(
             boundary: boundary,
-            model: "grok-voice-transcribe-2",
+            model: "grok-voice-transcribe-2.0",
             language: "en",
             keyterms: ["Typester"],
             wav: Data([0x01, 0x02])
@@ -53,7 +54,7 @@ final class XaiAPITests: XCTestCase {
         let text = String(decoding: body, as: UTF8.self)
 
         XCTAssertTrue(text.contains("name=\"model\""))
-        XCTAssertTrue(text.contains("grok-voice-transcribe-2"))
+        XCTAssertTrue(text.contains("grok-voice-transcribe-2.0"))
         XCTAssertTrue(text.contains("name=\"language\""))
         XCTAssertTrue(text.contains("name=\"format\""))
         XCTAssertTrue(text.contains("name=\"keyterm\""))
@@ -71,7 +72,7 @@ final class XaiAPITests: XCTestCase {
     func testMakeMultipartBodyOmitsLanguageWhenAbsent() {
         let body = XaiAPI.makeMultipartBody(
             boundary: "B",
-            model: "grok-voice-transcribe-2",
+            model: "grok-voice-transcribe-2.0",
             language: nil,
             keyterms: [],
             wav: Data([0x00])
@@ -84,7 +85,7 @@ final class XaiAPITests: XCTestCase {
     func testMakeMultipartBodyOmitsFormatWhenTextFormattingDisabled() {
         let body = XaiAPI.makeMultipartBody(
             boundary: "B",
-            model: "grok-voice-transcribe-2",
+            model: "grok-voice-transcribe-2.0",
             language: "en",
             keyterms: [],
             formatsText: false,

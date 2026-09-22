@@ -2,6 +2,14 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.24.1] — 2026-09-23
+
+### Fixed
+- **xAI (Grok) dictation failed with "The model `grok-voice-transcribe-2` does not exist or your team does not have access to it".** The app sent a model ID xAI does not recognize. It now uses `grok-voice-transcribe-2.0` for both the **Real-time** and **Async** routes, and passes the model explicitly on the streaming WebSocket URL.
+
+### Added
+- Hovering the **Real-time / Async** mode picker (Soniox and xAI) now shows a tooltip noting that real-time transcription costs more.
+
 ## [1.24.0] — 2026-09-23
 
 ### Added
@@ -18,7 +26,7 @@ All notable changes to Typester are documented in this file.
 - **xAI (Grok) speech-to-text provider.** Pick **xAI** in Settings or onboarding and choose a mode:
   - **Real-time** streams live text over the xAI WebSocket (`wss://api.x.ai/v1/stt`) with interim results, paste-on-pause, and speaker diarization for **Focus on my voice**.
   - **Async** records locally and uploads a WAV to `POST https://api.x.ai/v1/stt` after you stop (no live text, paste-on-pause disabled).
-  - Uses the `grok-voice-transcribe-2` model. Dictionary terms are sent as `keyterm` hints, and a language hint enables text formatting.
+  - Uses the `grok-voice-transcribe-2.0` model. Dictionary terms are sent as `keyterm` hints, and a language hint enables text formatting.
 
 ### Notes
 - Add your xAI API key from [console.x.ai](https://console.x.ai/team/default/api-keys) in Settings → xAI; it is stored in the macOS Keychain.

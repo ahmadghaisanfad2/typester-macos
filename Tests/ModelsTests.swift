@@ -189,7 +189,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
         XCTAssertEqual(STTProviderType.openrouter.modelID, SettingsStore.shared.openrouterModelID)
-        XCTAssertEqual(STTProviderType.xai.modelID, "grok-voice-transcribe-2")
+        XCTAssertEqual(STTProviderType.xai.modelID, "grok-voice-transcribe-2.0")
     }
 
     func testSTTProviderTypeAudioSampleRate() {
@@ -254,8 +254,8 @@ final class ModelsTests: XCTestCase {
     }
 
     func testXaiTranscribeModeModelID() {
-        XCTAssertEqual(XaiTranscribeMode.realtime.modelID, "grok-voice-transcribe-2")
-        XCTAssertEqual(XaiTranscribeMode.async.modelID, "grok-voice-transcribe-2")
+        XCTAssertEqual(XaiTranscribeMode.realtime.modelID, "grok-voice-transcribe-2.0")
+        XCTAssertEqual(XaiTranscribeMode.async.modelID, "grok-voice-transcribe-2.0")
     }
 
     // MARK: - OpenAITranscribeModel tests

@@ -335,6 +335,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
+                    .help("Real-time transcription costs more than Async.")
 
                     Spacer()
 
@@ -379,6 +380,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                .help("Real-time transcription costs more than Async.")
 
                 Spacer()
 
