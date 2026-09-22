@@ -93,6 +93,37 @@ final class DictionaryHelpersTests: XCTestCase {
         XCTAssertNil(DictionaryHelpers.buildSonioxContext(domain: "  ", topic: "", terms: []))
     }
 
+    func testBuildSonioxContextIncludesInstructions() {
+        let context = DictionaryHelpers.buildSonioxContext(
+            domain: "Software",
+            topic: "Standup",
+            terms: [],
+            instructions: "Use minimal punctuation."
+        )
+        let general = context?["general"] as? [[String: String]]
+        XCTAssertEqual(general?.count, 3)
+        XCTAssertTrue(general?.contains { $0["key"] == "instructions" && $0["value"] == "Use minimal punctuation." } == true)
+    }
+
+    func testBuildSonioxContextInstructionsOnly() {
+        let context = DictionaryHelpers.buildSonioxContext(
+            domain: "",
+            topic: "",
+            terms: [],
+            instructions: "Formal punctuation."
+        )
+        XCTAssertEqual((context?["general"] as? [[String: String]])?.count, 1)
+    }
+
+    func testBuildSonioxContextOmitsBlankInstructions() {
+        XCTAssertNil(DictionaryHelpers.buildSonioxContext(
+            domain: "",
+            topic: "",
+            terms: [],
+            instructions: "   "
+        ))
+    }
+
     func testBuildSonioxContextTrimsOversizedTerms() {
         let hugeTerms = (0..<500).map { String(repeating: "t\($0)", count: 40) }
         let context = DictionaryHelpers.buildSonioxContext(

@@ -1391,7 +1391,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let replaced = SettingsStore.shared.applyReplacements(text)
             let formatted = TranscriptFormatter.format(
                 replaced,
-                removeFillers: SettingsStore.shared.removeFillerWords
+                removeFillers: SettingsStore.shared.removeFillerWords,
+                style: SettingsStore.shared.transcriptStyle
             )
             let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
             textPaster.paste(
@@ -1588,7 +1589,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let replaced = SettingsStore.shared.applyReplacements(text)
         let formatted = TranscriptFormatter.format(
             replaced,
-            removeFillers: SettingsStore.shared.removeFillerWords
+            removeFillers: SettingsStore.shared.removeFillerWords,
+            style: SettingsStore.shared.transcriptStyle
         )
         let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
         textPaster.paste(

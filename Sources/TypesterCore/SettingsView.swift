@@ -567,12 +567,26 @@ struct SettingsView: View {
                 SettingsRow(
                     "Remove filler words",
                     help: "Strip hesitation sounds like “uh”, “um”, “you know” before pasting.",
-                    showsDivider: false
+                    showsDivider: true
                 ) {
                     Toggle("", isOn: $settings.removeFillerWords)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .tint(Codex.green)
+                }
+
+                SettingsRow(
+                    "Punctuation",
+                    help: "How much punctuation to keep. \(settings.transcriptStyle.helpText)",
+                    showsDivider: false
+                ) {
+                    Picker("Style", selection: $settings.transcriptStyle) {
+                        ForEach(TranscriptStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
                 }
             }
 

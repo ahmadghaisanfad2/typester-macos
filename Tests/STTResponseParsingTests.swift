@@ -436,6 +436,26 @@ final class STTResponseParsingTests: XCTestCase {
         XCTAssertTrue(input?["turn_detection"] is NSNull)
     }
 
+    func testOpenAISessionUpdatePromptFollowsStyle() {
+        let payload = OpenAIConnectionConfig.makeSessionUpdatePayload(
+            model: .gptLiveTranscribe,
+            pasteOnPause: false,
+            languageHints: [],
+            domain: "",
+            topic: "",
+            keywords: [],
+            style: .minimal
+        )
+
+        let session = payload["session"] as? [String: Any]
+        let input = (session?["audio"] as? [String: Any])?["input"] as? [String: Any]
+        let transcription = input?["transcription"] as? [String: Any]
+        let prompt = transcription?["prompt"] as? String
+
+        XCTAssertTrue(prompt?.contains("unpunctuated") == true)
+        XCTAssertFalse(prompt?.contains("proper punctuation") == true)
+    }
+
     // MARK: - xAI response parsing
 
     func testXaiCreatedReturnsNothing() {

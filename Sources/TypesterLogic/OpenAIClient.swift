@@ -59,15 +59,14 @@ public struct OpenAIConnectionConfig: STTConnectionConfig {
         languageHints: [String],
         domain: String,
         topic: String,
-        keywords: [String]
+        keywords: [String],
+        style: TranscriptStyle = .neutral
     ) -> [String: Any] {
         var transcription: [String: Any] = [
             "model": model.rawValue
         ]
 
-        var promptParts = [
-            "Transcribe clearly with proper punctuation, commas, periods, and sentence capitalization."
-        ]
+        var promptParts = [style.transcriptionPrompt]
         let trimmedDomain = domain.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDomain.isEmpty {
@@ -274,7 +273,8 @@ public class OpenAIClient: STTClientBase {
             languageHints: store.languageHints,
             domain: store.contextDomain,
             topic: store.contextTopic,
-            keywords: store.sonioxTerms
+            keywords: store.sonioxTerms,
+            style: store.transcriptStyle
         )
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),

@@ -149,7 +149,8 @@ public enum DictionaryHelpers {
     public static func buildSonioxContext(
         domain: String,
         topic: String,
-        terms: [String]
+        terms: [String],
+        instructions: String? = nil
     ) -> [String: Any]? {
         var context: [String: Any] = [:]
         var general: [[String: String]] = []
@@ -161,6 +162,10 @@ public enum DictionaryHelpers {
         }
         if !topicTrimmed.isEmpty {
             general.append(["key": "topic", "value": topicTrimmed])
+        }
+        let instructionsTrimmed = instructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !instructionsTrimmed.isEmpty {
+            general.append(["key": "instructions", "value": instructionsTrimmed])
         }
         if !general.isEmpty {
             context["general"] = general

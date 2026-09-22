@@ -9,17 +9,19 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
     public static func makeQueryItems(
         modelID: String,
         pasteOnPause: Bool,
-        focusOnMyVoice: Bool
+        focusOnMyVoice: Bool,
+        style: TranscriptStyle = .neutral
     ) -> [URLQueryItem] {
         let endpointing = pasteOnPause ? "500" : "false"
+        let punctuation = style.deepgramPunctuation
         var queryItems = [
             URLQueryItem(name: "model", value: modelID),
             URLQueryItem(name: "language", value: "multi"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "channels", value: "1"),
-            URLQueryItem(name: "punctuate", value: "true"),
-            URLQueryItem(name: "smart_format", value: "true"),
+            URLQueryItem(name: "punctuate", value: punctuation.punctuate ? "true" : "false"),
+            URLQueryItem(name: "smart_format", value: punctuation.smartFormat ? "true" : "false"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "endpointing", value: endpointing)
         ]
@@ -36,7 +38,8 @@ public struct DeepgramConnectionConfig: STTConnectionConfig {
         urlComponents.queryItems = Self.makeQueryItems(
             modelID: STTProviderType.deepgram.modelID,
             pasteOnPause: SettingsStore.shared.pasteOnPause,
-            focusOnMyVoice: SettingsStore.shared.focusOnMyVoice
+            focusOnMyVoice: SettingsStore.shared.focusOnMyVoice,
+            style: SettingsStore.shared.transcriptStyle
         )
 
         var request = URLRequest(url: urlComponents.url!)
