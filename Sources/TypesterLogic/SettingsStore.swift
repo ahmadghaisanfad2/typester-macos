@@ -128,6 +128,14 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Selected xAI transcription mode (real-time WebSocket vs async HTTP).
+    @Published public var xaiMode: XaiTranscribeMode = .realtime {
+        didSet {
+            UserDefaults.standard.set(xaiMode.rawValue, forKey: xaiModeKey)
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     @Published public var showStreamPreview: Bool = true {
         didSet {
             UserDefaults.standard.set(showStreamPreview, forKey: showStreamPreviewKey)
@@ -208,6 +216,7 @@ public class SettingsStore: ObservableObject {
     private let openaiModelKey = "openaiModel"
     private let sonioxModeKey = "sonioxMode"
     private let openrouterModelIDKey = "openrouterModelID"
+    private let xaiModeKey = "xaiMode"
     private let activationModeKey = "activationMode"
     private let pressToSpeakKeyKey = "pressToSpeakKey"
     private let languageHintsKey = "languageHints"
@@ -233,6 +242,7 @@ public class SettingsStore: ObservableObject {
     private let deepgramKeychainAccount = "deepgram-api-key"
     private let openaiKeychainAccount = "openai-api-key"
     private let openrouterKeychainAccount = "openrouter-api-key"
+    private let xaiKeychainAccount = "xai-api-key"
 
     private init() {
         loadShortcutKeys()
@@ -250,6 +260,7 @@ public class SettingsStore: ObservableObject {
         loadOpenAIModel()
         loadSonioxMode()
         loadOpenRouterModelID()
+        loadXaiMode()
         loadFeedbackPreferences()
         loadFocusOnMyVoicePreference()
         syncLaunchAtLoginStatus()
@@ -302,6 +313,9 @@ public class SettingsStore: ObservableObject {
     public var sonioxTerms: [String] {
         DictionaryHelpers.mergeTerms(manual: dictionaryTerms, pairs: correctionPairs)
     }
+
+    /// Dictionary terms for providers that accept key-term hints (Soniox context / xAI keyterm).
+    public var providerKeyterms: [String] { sonioxTerms }
 
     public var sonioxGeneral: [[String: String]] {
         var general: [[String: String]] = []
@@ -481,6 +495,14 @@ public class SettingsStore: ObservableObject {
         openrouterModelID = rawValue
     }
 
+    private func loadXaiMode() {
+        guard let rawValue = UserDefaults.standard.string(forKey: xaiModeKey),
+              let mode = XaiTranscribeMode(rawValue: rawValue) else {
+            return
+        }
+        xaiMode = mode
+    }
+
     private func loadFeedbackPreferences() {
         if UserDefaults.standard.object(forKey: showStreamPreviewKey) != nil {
             showStreamPreview = UserDefaults.standard.bool(forKey: showStreamPreviewKey)
@@ -560,6 +582,19 @@ public class SettingsStore: ObservableObject {
                 setKeychainItem(value, account: openrouterKeychainAccount)
             } else {
                 deleteKeychainItem(account: openrouterKeychainAccount)
+            }
+            objectWillChange.send()
+        }
+    }
+
+    // xAI API key
+    public var xaiApiKey: String? {
+        get { getKeychainItem(account: xaiKeychainAccount) }
+        set {
+            if let value = newValue {
+                setKeychainItem(value, account: xaiKeychainAccount)
+            } else {
+                deleteKeychainItem(account: xaiKeychainAccount)
             }
             objectWillChange.send()
         }

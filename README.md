@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/nickustinov/typester-macos/actions/workflows/tests.yml/badge.svg)](https://github.com/nickustinov/typester-macos/actions/workflows/tests.yml)
 
-A lightweight macOS menu bar app for speech-to-text dictation using [Soniox](https://soniox.com), [Deepgram](https://deepgram.com), [OpenAI](https://platform.openai.com), or [OpenRouter](https://openrouter.ai).
+A lightweight macOS menu bar app for speech-to-text dictation using [Soniox](https://soniox.com), [Deepgram](https://deepgram.com), [OpenAI](https://platform.openai.com), [OpenRouter](https://openrouter.ai), or [xAI](https://x.ai).
 
 ![Demo](Assets/demo.gif)
 
@@ -13,17 +13,17 @@ Typester lives in your menu bar and lets you dictate text directly into any appl
 **Bring Your Own Key (BYOK)** — Typester connects directly to your chosen speech-to-text provider using your own API key. No middleman, no subscription, no data collection. You pay only for what you use directly to the provider.
 
 Features:
-- **Multiple providers** — Choose Soniox, Deepgram, OpenAI, or OpenRouter for speech recognition
+- **Multiple providers** — Choose Soniox, Deepgram, OpenAI, OpenRouter, or xAI for speech recognition
 - **Press-to-speak** — Hold a key to dictate, release to paste (default mode; pick any side of ⌘ ⌥ ⌃ ⇧ or Fn)
 - **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or record any custom shortcut combo)
 - **Floating pill** — Optional Wispr-style always-on-top pill: click to start/stop dictation, drag it anywhere
 - **Cancel with Esc** — Press Escape while dictating to discard the transcript without pasting
 - **Filler-word cleanup** — Optional removal of hesitation fillers (uh, um, you know, I mean…) before paste
-- **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); OpenRouter uses batch transcription with a live model catalog
+- **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); xAI offers real-time WebSocket or async batch modes (`grok-voice-transcribe-2`); OpenRouter uses batch transcription with a live model catalog
 - **OpenAI model picker** — Select `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`
-- **Multilingual** — Soniox/OpenAI: language hints; Deepgram: auto-detects with multilingual model
+- **Multilingual** — Soniox/OpenAI/xAI: language hints; Deepgram: auto-detects with multilingual model
 - **Microphone selection** — Choose your preferred input device from the menu
-- **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox context / OpenAI keywords)
+- **Custom dictionary** — Add domain-specific words, names, or technical terms (Soniox context / OpenAI keywords / xAI keyterms)
 - **Automatic dictionary learning** — Correct a recently pasted transcript and Typester saves safe word/phrase corrections locally for future dictation
 - **Teachable corrections** — Use **Teach last transcript…** in the menu to save wrong→right pairs; they replace before paste and feed provider hints
 - **Domain / topic context** — Optional context fields in Settings for better domain bias
@@ -37,7 +37,7 @@ Features:
 ## Requirements
 
 - macOS 13 or later
-- API key from [Soniox](https://soniox.com), [Deepgram](https://console.deepgram.com), [OpenAI](https://platform.openai.com/api-keys), or [OpenRouter](https://openrouter.ai/keys)
+- API key from [Soniox](https://soniox.com), [Deepgram](https://console.deepgram.com), [OpenAI](https://platform.openai.com/api-keys), [OpenRouter](https://openrouter.ai/keys), or [xAI](https://console.x.ai/team/default/api-keys)
 
 ## Permissions
 
@@ -178,8 +178,12 @@ Sources/
 │   ├── STTProvider.swift           # Speech-to-text provider protocol
 │   ├── STTClientBase.swift         # Base class for STT WebSocket clients
 │   ├── SonioxClient.swift          # Soniox WebSocket streaming (stt-rt-v5)
+│   ├── SonioxAsyncClient.swift     # Soniox async HTTP transcription
 │   ├── DeepgramClient.swift        # Deepgram WebSocket streaming
 │   ├── OpenAIClient.swift          # OpenAI Realtime transcription
+│   ├── OpenRouterClient.swift      # OpenRouter batch transcription + model catalog
+│   ├── XaiClient.swift             # xAI (Grok) WebSocket streaming
+│   ├── XaiAsyncClient.swift        # xAI (Grok) async HTTP transcription
 │   ├── TranscriptFormatter.swift   # Local punctuation / capitalization cleanup
 │   ├── TextPaster.swift            # Clipboard + simulated Cmd+V paste
 │   ├── UpdateChecker.swift         # GitHub Releases update check + DMG download
@@ -201,7 +205,9 @@ Tests/
 ├── DictionaryHelpersTests.swift    # Correction / context helper tests
 ├── UpdateCheckerTests.swift        # Version compare + release parsing tests
 ├── TranscriptFormatterTests.swift  # Local transcript formatting tests
-└── STTResponseParsingTests.swift   # STT response parsing tests
+├── STTResponseParsingTests.swift   # STT response parsing tests
+├── OpenRouterAPITests.swift        # OpenRouter model / transcript parsing tests
+└── XaiAPITests.swift               # xAI request / response helper tests
 ```
 
 **Local build notes (Command Line Tools only):** macOS CLT may lack SwiftUI macro plugins and XCTest. Use:
@@ -215,7 +221,7 @@ swift build --build-system native --product dictionary-smoke
 Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-14`).
 ## Disclaimer
 
-This project is not affiliated with, endorsed by, or sponsored by Soniox, Deepgram, OpenAI, or OpenRouter. These are third-party services used for speech recognition.
+This project is not affiliated with, endorsed by, or sponsored by Soniox, Deepgram, OpenAI, OpenRouter, or xAI. These are third-party services used for speech recognition.
 
 ## License
 

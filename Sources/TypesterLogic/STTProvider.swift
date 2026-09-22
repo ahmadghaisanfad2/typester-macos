@@ -5,6 +5,7 @@ public enum STTProviderType: String, Codable, CaseIterable {
     case deepgram = "deepgram"
     case openai = "openai"
     case openrouter = "openrouter"
+    case xai = "xai"
 
     public var displayName: String {
         switch self {
@@ -12,6 +13,7 @@ public enum STTProviderType: String, Codable, CaseIterable {
         case .deepgram: return "Deepgram"
         case .openai: return "OpenAI"
         case .openrouter: return "OpenRouter"
+        case .xai: return "xAI"
         }
     }
 
@@ -22,13 +24,14 @@ public enum STTProviderType: String, Codable, CaseIterable {
         case .deepgram: return "nova-3"
         case .openai: return SettingsStore.shared.openaiModel.rawValue
         case .openrouter: return SettingsStore.shared.openrouterModelID
+        case .xai: return SettingsStore.shared.xaiMode.modelID
         }
     }
 
     /// PCM sample rate expected by the provider.
     public var audioSampleRate: Double {
         switch self {
-        case .soniox, .deepgram, .openrouter: return 16_000
+        case .soniox, .deepgram, .openrouter, .xai: return 16_000
         case .openai: return 24_000
         }
     }
@@ -40,7 +43,7 @@ public enum STTProviderType: String, Codable, CaseIterable {
     public var transcriptJoinStyle: TranscriptTokenJoinStyle {
         switch self {
         case .soniox: return .concatenate
-        case .deepgram, .openai, .openrouter: return .spaceBetweenUnpadded
+        case .deepgram, .openai, .openrouter, .xai: return .spaceBetweenUnpadded
         }
     }
 
@@ -51,6 +54,8 @@ public enum STTProviderType: String, Codable, CaseIterable {
             return true
         case .soniox:
             return SettingsStore.shared.sonioxMode == .async
+        case .xai:
+            return SettingsStore.shared.xaiMode == .async
         case .deepgram, .openai:
             return false
         }
@@ -77,6 +82,23 @@ public enum SonioxTranscribeMode: String, Codable, CaseIterable, Identifiable {
         case .async: return "stt-async-v5"
         }
     }
+}
+
+/// Selectable xAI transcription modes (real-time WebSocket vs async HTTP).
+public enum XaiTranscribeMode: String, Codable, CaseIterable, Identifiable {
+    case realtime = "realtime"
+    case async = "async"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .realtime: return "Real-time"
+        case .async: return "Async"
+        }
+    }
+
+    public var modelID: String { XaiAPI.modelID }
 }
 
 /// Selectable OpenAI Realtime transcription models.

@@ -36,6 +36,7 @@ struct OnboardingView: View {
         case .deepgram: return settings.deepgramApiKey != nil
         case .openai: return settings.openaiApiKey != nil
         case .openrouter: return settings.openrouterApiKey != nil
+        case .xai: return settings.xaiApiKey != nil
         }
     }
 
@@ -49,6 +50,8 @@ struct OnboardingView: View {
             return ("Get key", URL(string: "https://soniox.com")!)
         case .openrouter:
             return ("Get key", URL(string: "https://openrouter.ai/keys")!)
+        case .xai:
+            return ("Get key", URL(string: "https://console.x.ai/team/default/api-keys")!)
         }
     }
 
@@ -385,6 +388,8 @@ struct OnboardingView: View {
                             settings.openaiApiKey = apiKeyInput
                         case .openrouter:
                             settings.openrouterApiKey = apiKeyInput
+                        case .xai:
+                            settings.xaiApiKey = apiKeyInput
                         }
                     }
                     withAnimation { currentStep += 1 }
@@ -452,6 +457,14 @@ struct OnboardingView: View {
                 .onAppear {
                     openRouterModels.ensureLoaded()
                 }
+            } else if settings.sttProvider == .xai {
+                Picker("Mode", selection: $settings.xaiMode) {
+                    ForEach(XaiTranscribeMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
         }
     }
@@ -550,6 +563,8 @@ struct OnboardingView: View {
             apiKeyInput = settings.openaiApiKey ?? ""
         case .openrouter:
             apiKeyInput = settings.openrouterApiKey ?? ""
+        case .xai:
+            apiKeyInput = settings.xaiApiKey ?? ""
         }
     }
 

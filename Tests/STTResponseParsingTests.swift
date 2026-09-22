@@ -435,4 +435,155 @@ final class STTResponseParsingTests: XCTestCase {
         XCTAssertTrue((transcription?["prompt"] as? String)?.contains("Software") == true)
         XCTAssertTrue(input?["turn_detection"] is NSNull)
     }
+
+    // MARK: - xAI response parsing
+
+    func testXaiCreatedReturnsNothing() {
+        let config = XaiConnectionConfig()
+        let results = config.parseResponse(["type": "transcript.created"])
+        XCTAssertTrue(results.isEmpty)
+    }
+
+    func testXaiInterimPartial() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.partial",
+            "text": "hello wor",
+            "is_final": false,
+            "speech_final": false
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .transcript(let text, let isFinal, _) = results[0] {
+            XCTAssertEqual(text, "hello wor")
+            XCTAssertFalse(isFinal)
+        } else {
+            XCTFail("Expected interim transcript")
+        }
+    }
+
+    func testXaiChunkFinal() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.partial",
+            "text": "hello world",
+            "is_final": true,
+            "speech_final": false
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 1)
+        if case .transcript(let text, let isFinal, _) = results[0] {
+            XCTAssertEqual(text, "hello world")
+            XCTAssertTrue(isFinal)
+        } else {
+            XCTFail("Expected final transcript")
+        }
+    }
+
+    func testXaiUtteranceFinalEmitsEndpoint() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.partial",
+            "text": "hello world",
+            "is_final": true,
+            "speech_final": true
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 2)
+        XCTAssertTrue(results.contains { result in
+            if case .transcript(let text, true, _) = result { return text == "hello world" }
+            return false
+        })
+        XCTAssertTrue(results.contains { result in
+            if case .endpoint = result { return true }
+            return false
+        })
+    }
+
+    func testXaiTranscriptDone() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.done",
+            "text": "full utterance",
+            "duration": 2.4
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 2)
+        if case .transcript(let text, let isFinal, _) = results[0] {
+            XCTAssertEqual(text, "full utterance")
+            XCTAssertTrue(isFinal)
+        } else {
+            XCTFail("Expected final transcript")
+        }
+        if case .finalized = results[1] {
+            // Pass.
+        } else {
+            XCTFail("Expected finalized result")
+        }
+    }
+
+    func testXaiEmptyTextIgnored() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.partial",
+            "text": "",
+            "is_final": true
+        ]
+        XCTAssertTrue(config.parseResponse(json).isEmpty)
+    }
+
+    func testXaiError() {
+        let config = XaiConnectionConfig()
+        let results = config.parseResponse([
+            "type": "error",
+            "message": "Invalid API key"
+        ])
+
+        XCTAssertEqual(results.count, 1)
+        if case .error(let message) = results[0] {
+            XCTAssertEqual(message, "Invalid API key")
+        } else {
+            XCTFail("Expected error result")
+        }
+    }
+
+    func testXaiDiarizedWordsSplitBySpeaker() {
+        let config = XaiConnectionConfig()
+        let json: [String: Any] = [
+            "type": "transcript.partial",
+            "text": "hi there hello you",
+            "is_final": true,
+            "speech_final": false,
+            "words": [
+                ["text": "hi", "speaker": 0],
+                ["text": "there", "speaker": 0],
+                ["text": "hello", "speaker": 1],
+                ["text": "you", "speaker": 1]
+            ]
+        ]
+
+        let results = config.parseResponse(json)
+
+        XCTAssertEqual(results.count, 2)
+        if case .transcript(let text, true, let speaker) = results[0] {
+            XCTAssertEqual(text, "hi there")
+            XCTAssertEqual(speaker, "0")
+        } else {
+            XCTFail("Expected first speaker run")
+        }
+        if case .transcript(let text, true, let speaker) = results[1] {
+            XCTAssertEqual(text, "hello you")
+            XCTAssertEqual(speaker, "1")
+        } else {
+            XCTFail("Expected second speaker run")
+        }
+    }
 }
