@@ -156,6 +156,7 @@ public final class XaiAsyncClient: STTProvider {
             model: XaiAPI.modelID,
             language: SettingsStore.shared.languageHints.first,
             keyterms: SettingsStore.shared.providerKeyterms,
+            formatsText: SettingsStore.shared.transcriptStyle.usesInverseTextNormalization,
             wav: wav
         )
 

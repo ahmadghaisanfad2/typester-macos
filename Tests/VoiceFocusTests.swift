@@ -107,6 +107,30 @@ final class VoiceFocusConfigTests: XCTestCase {
         XCTAssertFalse(items.contains { $0.name == "diarize_model" })
     }
 
+    func testDeepgramQueryDisablesPunctuationForMinimalStyle() {
+        let items = DeepgramConnectionConfig.makeQueryItems(
+            modelID: "nova-3",
+            pasteOnPause: false,
+            focusOnMyVoice: false,
+            style: .minimal
+        )
+        let map = Dictionary(grouping: items, by: \.name).compactMapValues { $0.first?.value }
+        XCTAssertEqual(map["punctuate"], "false")
+        XCTAssertEqual(map["smart_format"], "false")
+    }
+
+    func testDeepgramQueryKeepsPunctuationForFormalStyle() {
+        let items = DeepgramConnectionConfig.makeQueryItems(
+            modelID: "nova-3",
+            pasteOnPause: false,
+            focusOnMyVoice: false,
+            style: .formal
+        )
+        let map = Dictionary(grouping: items, by: \.name).compactMapValues { $0.first?.value }
+        XCTAssertEqual(map["punctuate"], "true")
+        XCTAssertEqual(map["smart_format"], "true")
+    }
+
     func testDeepgramParseEmitsSpeakerFromWords() {
         let config = DeepgramConnectionConfig()
         let json: [String: Any] = [

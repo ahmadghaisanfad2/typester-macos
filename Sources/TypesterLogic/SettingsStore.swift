@@ -194,6 +194,15 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// How much punctuation to keep in the finalized transcript. Steers the
+    /// Soniox model through a context instruction and normalizes the text
+    /// locally for every provider.
+    @Published public var transcriptStyle: TranscriptStyle = .neutral {
+        didSet {
+            UserDefaults.standard.set(transcriptStyle.rawValue, forKey: transcriptStyleKey)
+        }
+    }
+
     /// Persistent Wispr-style floating pill that starts/stops dictation on click.
     @Published public var showFloatingPill: Bool = false {
         didSet {
@@ -234,6 +243,7 @@ public class SettingsStore: ObservableObject {
     private let pasteOnPauseKey = "pasteOnPause"
     private let copyTranscriptToClipboardKey = "copyTranscriptToClipboard"
     private let removeFillerWordsKey = "removeFillerWords"
+    private let transcriptStyleKey = "transcriptStyle"
     private let showFloatingPillKey = "showFloatingPill"
     private let showInDockKey = "showInDock"
     private let focusOnMyVoiceKey = "focusOnMyVoice"
@@ -263,6 +273,7 @@ public class SettingsStore: ObservableObject {
         loadXaiMode()
         loadFeedbackPreferences()
         loadFocusOnMyVoicePreference()
+        loadTranscriptStyle()
         syncLaunchAtLoginStatus()
     }
 
@@ -334,7 +345,8 @@ public class SettingsStore: ObservableObject {
         DictionaryHelpers.buildSonioxContext(
             domain: contextDomain,
             topic: contextTopic,
-            terms: sonioxTerms
+            terms: sonioxTerms,
+            instructions: transcriptStyle.sonioxInstructions
         )
     }
 
@@ -440,6 +452,14 @@ public class SettingsStore: ObservableObject {
         if UserDefaults.standard.object(forKey: focusOnMyVoiceKey) != nil {
             focusOnMyVoice = UserDefaults.standard.bool(forKey: focusOnMyVoiceKey)
         }
+    }
+
+    private func loadTranscriptStyle() {
+        guard let rawValue = UserDefaults.standard.string(forKey: transcriptStyleKey),
+              let style = TranscriptStyle(rawValue: rawValue) else {
+            return
+        }
+        transcriptStyle = style
     }
 
     private func loadContextDomain() {

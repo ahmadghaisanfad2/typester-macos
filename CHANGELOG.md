@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.24.0] — 2026-09-23
+
+### Added
+- **Punctuation styles.** Settings → Dictation → **Punctuation** now offers **Minimal**, **Casual**, **Neutral**, and **Formal**, and applies to every provider — Soniox (real-time and async), Deepgram, OpenAI, OpenRouter, and xAI:
+  - **Minimal** strips sentence punctuation and auto-capitalization.
+  - **Casual** drops sentence-ending periods but keeps `?`/`!` and abbreviations like `Dr.`.
+  - **Neutral** keeps the provider's punctuation (the previous behavior).
+  - **Formal** keeps full punctuation and adds a sentence-ending period.
+- Each provider is steered natively where its API allows it, then the transcript is normalized locally so the result stays predictable: Soniox receives a `context.general` instruction, OpenAI a transcription `prompt`, Deepgram toggles `punctuate`/`smart_format`, and xAI async skips inverse text normalization for **Minimal**. xAI real-time exposes no formatting knob, so it relies on the same local normalization.
+
 ## [1.23.0] — 2026-09-22
 
 ### Added

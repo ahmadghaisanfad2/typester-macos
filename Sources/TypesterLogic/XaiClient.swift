@@ -57,6 +57,7 @@ public enum XaiAPI {
         model: String,
         language: String?,
         keyterms: [String],
+        formatsText: Bool = true,
         wav: Data
     ) -> Data {
         var body = Data()
@@ -70,8 +71,11 @@ public enum XaiAPI {
         appendField("model", model)
         if let language, !language.isEmpty {
             appendField("language", language)
-            // Inverse text normalization needs a language to format against.
-            appendField("format", "true")
+            // Inverse text normalization needs a language to format against, and
+            // Minimal style deliberately skips it to keep the raw output.
+            if formatsText {
+                appendField("format", "true")
+            }
         }
         for term in sanitizedKeyterms(keyterms) {
             appendField("keyterm", term)

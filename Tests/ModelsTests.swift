@@ -275,4 +275,43 @@ final class ModelsTests: XCTestCase {
         XCTAssertTrue(OpenAITranscribeModel.gptLiveTranscribe.supportsDelay)
         XCTAssertFalse(OpenAITranscribeModel.gptTranscribe.supportsDelay)
     }
+
+    // MARK: - TranscriptStyle tests
+
+    func testTranscriptStyleRawValues() {
+        XCTAssertEqual(TranscriptStyle.minimal.rawValue, "minimal")
+        XCTAssertEqual(TranscriptStyle.casual.rawValue, "casual")
+        XCTAssertEqual(TranscriptStyle.neutral.rawValue, "neutral")
+        XCTAssertEqual(TranscriptStyle.formal.rawValue, "formal")
+    }
+
+    func testTranscriptStyleAllCases() {
+        XCTAssertEqual(TranscriptStyle.allCases.count, 4)
+    }
+
+    func testTranscriptStyleCodable() throws {
+        let encoded = try JSONEncoder().encode(TranscriptStyle.casual)
+        let decoded = try JSONDecoder().decode(TranscriptStyle.self, from: encoded)
+        XCTAssertEqual(decoded, .casual)
+    }
+
+    func testTranscriptStyleSonioxInstructions() {
+        XCTAssertNotNil(TranscriptStyle.minimal.sonioxInstructions)
+        XCTAssertNotNil(TranscriptStyle.casual.sonioxInstructions)
+        XCTAssertNil(TranscriptStyle.neutral.sonioxInstructions)
+        XCTAssertNotNil(TranscriptStyle.formal.sonioxInstructions)
+    }
+
+    func testTranscriptStyleProviderHints() {
+        XCTAssertFalse(TranscriptStyle.minimal.deepgramPunctuation.punctuate)
+        XCTAssertFalse(TranscriptStyle.minimal.deepgramPunctuation.smartFormat)
+        XCTAssertTrue(TranscriptStyle.casual.deepgramPunctuation.punctuate)
+        XCTAssertTrue(TranscriptStyle.formal.deepgramPunctuation.smartFormat)
+
+        XCTAssertFalse(TranscriptStyle.minimal.usesInverseTextNormalization)
+        XCTAssertTrue(TranscriptStyle.casual.usesInverseTextNormalization)
+
+        XCTAssertTrue(TranscriptStyle.minimal.transcriptionPrompt.contains("unpunctuated"))
+        XCTAssertTrue(TranscriptStyle.neutral.transcriptionPrompt.contains("proper punctuation"))
+    }
 }

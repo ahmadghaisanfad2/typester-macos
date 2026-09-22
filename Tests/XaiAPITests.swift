@@ -81,6 +81,20 @@ final class XaiAPITests: XCTestCase {
         XCTAssertFalse(text.contains("name=\"format\""))
     }
 
+    func testMakeMultipartBodyOmitsFormatWhenTextFormattingDisabled() {
+        let body = XaiAPI.makeMultipartBody(
+            boundary: "B",
+            model: "grok-voice-transcribe-2",
+            language: "en",
+            keyterms: [],
+            formatsText: false,
+            wav: Data([0x00])
+        )
+        let text = String(decoding: body, as: UTF8.self)
+        XCTAssertTrue(text.contains("name=\"language\""))
+        XCTAssertFalse(text.contains("name=\"format\""))
+    }
+
     func testParseRestText() throws {
         let json = """
         { "text": "hello from xai", "language": "English", "duration": 1.2 }
