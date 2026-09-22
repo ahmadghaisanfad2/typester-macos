@@ -6,30 +6,36 @@ import Foundation
 /// tap even though the session “starts successfully.” That surfaces as empty
 /// history entries (`Failed · App`) with zero-filled `.pcm` files. Callers
 /// observe converted buffers and surface an error once silence is sustained.
+///
+/// The threshold is measured in seconds of captured audio, not buffers: voice
+/// processing can deliver far larger (and far fewer) buffers than the ~60 Hz
+/// tap hint, so a buffer-count threshold can never be reached on those Macs.
 public struct CaptureSilenceDetector: Equatable, Sendable {
-    /// ~0.5s when the tap emits ~60 Hz chunks.
-    public var silentBufferThreshold: Int
-    public private(set) var consecutiveSilentBuffers = 0
+    /// Seconds of consecutive all-zero PCM before the detector fires.
+    public var silentSecondsThreshold: Double
+    public private(set) var consecutiveSilentSeconds: Double = 0
     public private(set) var didFire = false
 
-    public init(silentBufferThreshold: Int = 30) {
-        self.silentBufferThreshold = max(1, silentBufferThreshold)
+    public init(silentSecondsThreshold: Double = 0.5) {
+        self.silentSecondsThreshold = max(0.05, silentSecondsThreshold)
     }
 
     public mutating func reset() {
-        consecutiveSilentBuffers = 0
+        consecutiveSilentSeconds = 0
         didFire = false
     }
 
-    /// Returns true exactly once when silence has been sustained past the threshold.
-    public mutating func observe(pcm16 data: Data) -> Bool {
+    /// Returns true exactly once, when silence has been sustained past the
+    /// threshold. `sampleRate` is the rate of `data`, used to turn frames into
+    /// seconds so the threshold holds for any buffer size.
+    public mutating func observe(pcm16 data: Data, sampleRate: Double) -> Bool {
         if Self.isSilent(pcm16: data) {
-            consecutiveSilentBuffers += 1
+            consecutiveSilentSeconds += Double(data.count / 2) / max(sampleRate, 1)
         } else {
-            consecutiveSilentBuffers = 0
+            consecutiveSilentSeconds = 0
             return false
         }
-        guard !didFire, consecutiveSilentBuffers >= silentBufferThreshold else { return false }
+        guard !didFire, consecutiveSilentSeconds >= silentSecondsThreshold else { return false }
         didFire = true
         return true
     }

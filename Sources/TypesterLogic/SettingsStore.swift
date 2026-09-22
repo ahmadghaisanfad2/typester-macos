@@ -211,9 +211,11 @@ public class SettingsStore: ObservableObject {
         }
     }
 
-    /// Prefer the dictating user’s voice: Apple voice-processing DSP + primary-speaker filter.
-    /// Default off — VP has produced all-zero capture on some Macs/mics (empty “Failed”
-    /// transcripts). Users can re-enable in Settings once their mic path is verified.
+    /// Prefer the dictating user’s voice: keep only the first speaker after you
+    /// start dictating (Soniox/Deepgram diarization). Noise isolation is left to
+    /// the macOS mic mode — Apple voice processing on the mic path captures
+    /// all-zero audio on some Macs, so Typester never enables it itself.
+    /// Default off.
     @Published public var focusOnMyVoice: Bool = false {
         didSet {
             UserDefaults.standard.set(focusOnMyVoice, forKey: focusOnMyVoiceKey)

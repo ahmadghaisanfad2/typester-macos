@@ -354,31 +354,11 @@ public class AudioRecorder {
 
         let inputNode = engine.inputNode
 
-        // Apple voice-processing DSP (noise / speech focus) before reading formats —
-        // enabling it can change the input node's hardware format.
-        if SettingsStore.shared.focusOnMyVoice {
-            do {
-                try inputNode.setVoiceProcessingEnabled(true)
-                Debug.log("Voice processing enabled on mic path")
-            } catch {
-                Debug.log("Voice processing unavailable: \(error.localizedDescription)")
-            }
-        } else if inputNode.isVoiceProcessingEnabled {
-            // Warm engines may still have VP from a previous session when the
-            // user turned Focus on my voice off.
-            do {
-                try inputNode.setVoiceProcessingEnabled(false)
-                Debug.log("Voice processing disabled on mic path")
-            } catch {
-                Debug.log("Voice processing disable failed: \(error.localizedDescription)")
-            }
-        }
-
         if state.wasAbandoned { return nil }
 
-        // Start the engine BEFORE installing the tap. Voice-processing graphs
-        // often rewrite the input node's format at start; tapping the pre-start
-        // format yields all-zero Int16 on some Macs (empty STT → “Failed”).
+        // Start the engine BEFORE installing the tap. The input node's hardware
+        // format settles at start, and tapping a stale format yields all-zero
+        // Int16 on some Macs (empty STT → “Failed”).
         do {
             Debug.log("Starting audio engine...")
             try engine.start()
@@ -456,15 +436,14 @@ public class AudioRecorder {
                 return
             }
 
-            if self.silenceDetector.observe(pcm16: pcm) {
+            if self.silenceDetector.observe(pcm16: pcm, sampleRate: targetFormat.sampleRate) {
                 Debug.log("Mic path is delivering sustained digital silence after convert")
                 DispatchQueue.main.async { [weak self] in
                     self?.onError?(
-                        "The microphone is sending silence. Turn off Settings → Dictation → Focus on my voice, then dictate again."
+                        "The microphone is sending silence. Check the selected input device, then dictate again."
                     )
                 }
             }
-
             self.onAudioBuffer?(pcm)
         }
         if state.wasAbandoned {

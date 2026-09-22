@@ -2,6 +2,12 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.24.2] — 2026-09-23
+
+### Fixed
+- **Dictation failed on every provider with empty “Failed · App” history and nothing pasted.** With **Focus on my voice** on, capture ran through Apple voice processing, which on some Macs delivers all-zero PCM — every recording was pure digital silence, so Soniox, Deepgram, OpenAI, OpenRouter and xAI all returned nothing. Typester no longer enables voice processing on the mic path at all (the 1.22.3 “start the engine before the tap” mitigation did not hold on these Macs); **Focus on my voice** keeps doing what it says by keeping only the first speaker on Soniox and Deepgram, and noise isolation is left to the macOS mic mode (**Voice Isolation** under Control Center → Mic Mode).
+- **The silent-capture watchdog never fired.** It counted *buffers* against a ~60 Hz tap assumption, but Apple's voice processor delivers far fewer, larger buffers, so sustained silence went unnoticed instead of surfacing an error. It now measures silence in seconds, so a genuinely silent mic reports “the microphone is sending silence” instead of silently failing.
+
 ## [1.24.1] — 2026-09-23
 
 ### Fixed

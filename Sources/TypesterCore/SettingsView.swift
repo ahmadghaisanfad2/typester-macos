@@ -598,7 +598,7 @@ struct SettingsView: View {
             ) {
                 SettingsRow(
                     "Focus on my voice",
-                    help: "Reduce other people’s speech in dictation. Uses Apple voice-processing on the mic path and, on Soniox/Deepgram, keeps only the first speaker after you start dictating.",
+                    help: "Reduce other people’s speech in dictation. Keeps only the first speaker after you start dictating (Soniox and Deepgram).",
                     showsDivider: true
                 ) {
                     Toggle("", isOn: $settings.focusOnMyVoice)
@@ -1209,7 +1209,7 @@ struct SettingsView: View {
     }
 
     private var voiceFocusFooter: String {
-        "On (recommended): apply Apple voice-processing to the mic path. Soniox and Deepgram also diarize and keep only the first speaker after you start dictating. Best results when macOS mic mode is Voice Isolation."
+        "On: Soniox and Deepgram keep only the first speaker after you start dictating. Typester leaves the mic path untouched — Apple voice processing records silence on some Macs, so pick Voice Isolation under macOS mic mode when you want noise isolation."
     }
 
     private var activeMicrophoneModeLabel: String {

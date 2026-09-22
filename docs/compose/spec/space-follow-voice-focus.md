@@ -14,6 +14,8 @@ commits: 4cc8bada96aa079472d72a4bf5b2312b695f7716..94a20dec92ac65f176011a866e76b
 
 Voice focus (`SettingsStore.focusOnMyVoice`, default on) enables Apple voice-processing on the mic path for every provider (and disables it on warm engines when the setting is off). On Soniox and Deepgram it enables diarization and keeps only the first speaker after dictation starts. Unlabeled tokens still pass through. Settings exposes a “Focus on my voice” toggle and a macOS Mic Modes helper (system Voice Isolation cannot be forced by the app). Span joining inserts spaces when unpadded speaker-filtered deltas are batched so primary-speaker words never glue.
 
+**Amended 1.24.2** — The local voice-processing step is gone. `setVoiceProcessingEnabled(true)` makes the mic path deliver all-zero PCM on some Macs, which quietly failed dictation on *every* provider (empty history entries, nothing pasted). Noise isolation is now delegated entirely to the macOS mic mode; `focusOnMyVoice` keeps the provider-side primary-speaker filter. The capture silence watchdog also measures silence in seconds rather than buffers, since Apple's voice processor could deliver too few buffers to ever cross a buffer-count threshold.
+
 **Verification** — `swift build` PASS; `swift test` PASS (229 tests, 0 failures), including PrimarySpeakerFilterTests, VoiceFocusConfigTests, and span-join regressions. Independent review of `4cc8bad..25c00ca` found two criticals (Deepgram span glue; inverted Space reaffirm guard); fixed in `ed988f5` and re-review approved. Residual cross-message join fixed in the session assembler/overlay with tests. AppKit Space membership remains a residual manual check (swipe Desktop 1→2→3 while dictating).
 
 **Journey log**
