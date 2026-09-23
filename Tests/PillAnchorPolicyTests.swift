@@ -150,3 +150,120 @@ final class PillAnchorPolicyTests: XCTestCase {
         }
     }
 }
+
+final class DockReserveTests: XCTestCase {
+    private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    private let insets = PillInsets(top: 26, left: 34, bottom: 32, right: 34)
+    /// What macOS 27 actually reports for a pinned Dock with tilesize 38.
+    private let observedDockBand: CGFloat = 58
+
+    private func dock(
+        autohide: Bool,
+        orientation: String = "bottom",
+        tile: CGFloat = 38,
+        magnification: Bool = false,
+        large: CGFloat = 62
+    ) -> DockPreferences {
+        DockPreferences(
+            autohide: autohide,
+            orientation: orientation,
+            tileSize: tile,
+            magnification: magnification,
+            largeSize: large
+        )
+    }
+
+    func testAutoHideOffUsesTheReportedVisibleFrame() {
+        // A pinned Dock is already excluded by macOS, so nothing to add.
+        let visible = CGRect(x: 0, y: observedDockBand, width: 1440, height: 812)
+        let effective = DockReserve.visibleFrame(
+            screenFrame: screen,
+            visibleFrame: visible,
+            dock: dock(autohide: false)
+        )
+        XCTAssertEqual(effective, visible)
+    }
+
+    func testAutoHideOnReservesTheDockBand() {
+        // Measured: an auto-hidden Dock reports a bottom reserve of 0.
+        let hidden = CGRect(x: 0, y: 0, width: 1440, height: 870)
+        let prefs = dock(autohide: true)
+        let effective = DockReserve.visibleFrame(
+            screenFrame: screen,
+            visibleFrame: hidden,
+            dock: prefs
+        )
+        XCTAssertEqual(effective.minY, DockReserve.band(prefs), accuracy: 0.001)
+        XCTAssertEqual(
+            effective.height,
+            870 - DockReserve.band(prefs),
+            accuracy: 0.001
+        )
+    }
+
+    /// The reported bug: with the Dock auto-hidden the pill dropped to the
+    /// bottom, so the Dock covered it the moment the user reached for it.
+    func testPillClearsARevealedAutoHiddenDock() {
+        let hidden = CGRect(x: 0, y: 0, width: 1440, height: 870)
+        let window = CGSize(
+            width: 44 + insets.left + insets.right,
+            height: 24 + insets.top + insets.bottom
+        )
+
+        let point = PillAnchorPolicy.origin(
+            windowSize: window,
+            screen: (frame: screen, visibleFrame: hidden),
+            dock: dock(autohide: true),
+            edge: .bottom,
+            insets: insets
+        )
+
+        let capsuleBottom = point.y + insets.bottom
+        XCTAssertGreaterThanOrEqual(
+            capsuleBottom,
+            observedDockBand + PillAnchorPolicy.defaultEdgeGap,
+            "the pill must stay clear of a Dock that reveals itself"
+        )
+    }
+
+    func testLeftAutoHiddenDockReservesHorizontally() {
+        let hidden = CGRect(x: 0, y: 0, width: 1440, height: 870)
+        let prefs = dock(autohide: true, orientation: "left")
+        let band = DockReserve.band(prefs)
+        let effective = DockReserve.visibleFrame(
+            screenFrame: screen,
+            visibleFrame: hidden,
+            dock: prefs
+        )
+        XCTAssertEqual(effective.minX, band, accuracy: 0.001)
+        XCTAssertEqual(effective.width, 1440 - band, accuracy: 0.001)
+    }
+
+    func testRightAutoHiddenDockReservesHorizontally() {
+        let hidden = CGRect(x: 0, y: 0, width: 1440, height: 870)
+        let prefs = dock(autohide: true, orientation: "right")
+        let band = DockReserve.band(prefs)
+        let effective = DockReserve.visibleFrame(
+            screenFrame: screen,
+            visibleFrame: hidden,
+            dock: prefs
+        )
+        XCTAssertEqual(effective.maxX, 1440 - band, accuracy: 0.001)
+        XCTAssertEqual(effective.width, 1440 - band, accuracy: 0.001)
+    }
+
+    func testMagnifiedDockReservesItsLargeSize() {
+        let normal = DockReserve.band(dock(autohide: true, magnification: false, large: 62))
+        let magnified = DockReserve.band(dock(autohide: true, magnification: true, large: 62))
+        XCTAssertEqual(normal, 62, accuracy: 0.001)
+        XCTAssertEqual(magnified, 86, accuracy: 0.001)
+        XCTAssertGreaterThan(magnified, normal)
+    }
+
+    func testReserveNeverUndershootsTheObservedDock() {
+        XCTAssertGreaterThanOrEqual(
+            DockReserve.band(dock(autohide: true, tile: 38)),
+            observedDockBand
+        )
+    }
+}

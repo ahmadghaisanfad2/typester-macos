@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.1] — 2026-09-23
+
+### Fixed
+- **The pill slid diagonally across the screen as it expanded into the caption.** The window frame was animated while the caption content stayed pinned to its final size inside it, so mid-transition what you saw was a cropped corner of the caption tracking the moving window rather than the pill inflating. The window is now sized once per state and never moves: the capsule grows from the pill's own anchor point, bottom-centre, so the whole transition happens in place.
+- **A revealed Dock covered the pill.** With **Automatically hide and show the Dock** on, macOS reports the screen as if the Dock were absent and says nothing when the Dock reveals itself — no notification fires and `NSScreen.visibleFrame` never changes — so the pill sat in the strip the Dock appears in and was hidden the moment it was reached for. When auto-hide is on the pill now reserves the Dock's configured thickness (tilesize, magnification, orientation), so it stays clear whether the Dock is showing or not.
+
+### Changed
+- Hovering the caption while dictating now offers **Stop** — finish and paste — next to **Cancel**, which discards. Mouse-only dictation no longer needs the hotkey to finish.
+- The resting pill is a plain faint capsule: no logo, no text. It lifts on hover so it stays discoverable.
+
 ## [1.25.0] — 2026-09-23
 
 ### Added
