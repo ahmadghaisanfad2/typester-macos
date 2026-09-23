@@ -426,6 +426,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         subtitleOverlay.onToggle = { [weak self] in
             self?.toggleRecording()
         }
+        subtitleOverlay.onStop = { [weak self] in
+            self?.stopRecording()
+        }
         subtitleOverlay.onCancel = { [weak self] in
             self?.cancelActiveTranscription()
         }
