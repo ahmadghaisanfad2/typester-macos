@@ -40,10 +40,12 @@ class SubtitleViewModel: ObservableObject {
     /// the transition grows in place instead of resizing the window under a
     /// fixed-size content.
     @Published var morph: Double = 0
-    /// Natural (unclipped) size of the caption content, measured by the view.
-    /// The controller sizes the window from this so the shell can never outgrow
-    /// its window mid-morph.
-    @Published var captionContentSize: CGSize = .zero
+    /// True while the window has to stay large enough for the expanded caption.
+    /// The morph animates only inside SwiftUI, so `morph` already reads 0 the
+    /// instant a collapse *starts*; the window (and the view's own layout) must
+    /// wait for the animation to land before shrinking, or the collapsing shell
+    /// would be clipped.
+    @Published var expandedWindow = false
 
     var hasText: Bool {
         !finalText.isEmpty || !interimText.isEmpty
@@ -328,38 +330,51 @@ struct SubtitleView: View {
     var onToggle: (() -> Void)?
     var onStop: (() -> Void)?
     var onCancel: (() -> Void)?
-    /// Fired when the caption's natural size changes, so the controller can
-    /// resize the window to match before the shell ever outgrows it.
-    var onContentSizeChange: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     /// One inset set for both states. The anchor is derived from the capsule
     /// plus these insets, so sharing them keeps the capsule's anchored edge on
     /// the same screen point whether the pill is resting or expanded — that is
     /// what lets the morph grow in place instead of drifting across the screen.
-    static let insets = PillInsets(top: 26, left: 34, bottom: 32, right: 34)
-    static let restingCapsule = CGSize(width: 44, height: 24)
+    static let insets = PillInsets(top: 24, left: 30, bottom: 30, right: 30)
+    /// Deliberately slim: the resting pill is a hairline, not a lozenge.
+    static let restingCapsule = CGSize(width: 42, height: 14)
     static let expandedCornerRadius: CGFloat = 20
-    /// The resting pill is deliberately faint; hovering lifts it so it stays
-    /// discoverable without shouting.
+    /// The resting pill is faint; hovering lifts it so it stays discoverable.
     static let restingOpacity: Double = 0.34
     static let hoverOpacity: Double = 0.9
     /// Floor that leaves room for the Stop / Cancel buttons revealed on hover.
     static let captionMinWidth: CGFloat = 200
 
     var body: some View {
-        shell
-            // Fill the window and pin the shell to its bottom-centre: any
-            // mismatch between content and window then crops the top/sides
-            // instead of sliding the capsule diagonally.
+        // The caption laid out at its natural size sets the *expanded* window
+        // size through `fittingSize`, and each overlay reads the same geometry
+        // with its own GeometryReader — a real container, which is reliable,
+        // unlike a preference measured through a background. While resting the
+        // layout is pinned to the pill's footprint instead: an oversized layout
+        // in a smaller window gets centred, which would drop the capsule below
+        // its anchor.
+        captionContent
+            .fixedSize()
+            .opacity(captionOpacity)
+            .mask { animatedCapsuleMask }
+            .allowsHitTesting(isExpanded)
+            .padding(Self.insets.edgeInsets)
+            .frame(width: restingWindowSize?.width, height: restingWindowSize?.height)
+            .background { capsuleShell }
+            .overlay { capsuleHitArea }
+            .opacity(shellOpacity)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .onPreferenceChange(CaptionSizeKey.self) { size in
-                guard size.width > 1, size.height > 1 else { return }
-                guard abs(size.width - viewModel.captionContentSize.width) > 0.5
-                    || abs(size.height - viewModel.captionContentSize.height) > 0.5 else { return }
-                viewModel.captionContentSize = size
-                onContentSizeChange?()
-            }
+    }
+
+    /// Window footprint while resting. `nil` when the caption should size the
+    /// window itself.
+    private var restingWindowSize: CGSize? {
+        guard !viewModel.expandedWindow else { return nil }
+        return CGSize(
+            width: Self.restingCapsule.width + Self.insets.left + Self.insets.right,
+            height: Self.restingCapsule.height + Self.insets.top + Self.insets.bottom
+        )
     }
 
     private var morph: CGFloat { CGFloat(viewModel.morph) }
@@ -371,78 +386,90 @@ struct SubtitleView: View {
         min(1, max(0, (viewModel.morph - 0.3) / 0.7))
     }
 
-    /// The resting pill inflating into the measured caption.
-    private var capsuleSize: CGSize {
-        let target = CGSize(
-            width: max(Self.restingCapsule.width, viewModel.captionContentSize.width),
-            height: max(Self.restingCapsule.height, viewModel.captionContentSize.height)
-        )
-        return CGSize(
-            width: Self.restingCapsule.width + (target.width - Self.restingCapsule.width) * morph,
-            height: Self.restingCapsule.height + (target.height - Self.restingCapsule.height) * morph
-        )
-    }
-
-    private var cornerRadius: CGFloat {
-        min(capsuleSize.height / 2, Self.expandedCornerRadius)
-    }
-
     private var shellOpacity: Double {
         let resting = viewModel.isHovering ? Self.hoverOpacity : Self.restingOpacity
         return resting + (1 - resting) * viewModel.morph
     }
 
-    private var shell: some View {
-        // The resting pill has no content of its own — the capsule shell is all
-        // there is, and `.frame` below is what sizes it. The caption is laid out
-        // at its natural size and the frame crops it from the centre, so the bar
-        // inflates in place instead of reflowing.
-        captionContent
-            .fixedSize()
-            .background(captionSizeReader)
-            .opacity(captionOpacity)
-            .allowsHitTesting(isExpanded)
-            .frame(width: capsuleSize.width, height: capsuleSize.height)
-            // Clip to the capsule itself, not a rectangle, so content never pokes
-            // through the rounded ends while the shell is growing.
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            // Hit area is the capsule too: the transparent shadow bleed around it
-            // must not start dictation.
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.18)) { viewModel.isHovering = hovering }
-            }
-            .onTapGesture { if !isExpanded { onToggle?() } }
-            .contextMenu {
-                if viewModel.isActive {
-                    Button("Cancel Dictation") { onCancel?() }
-                }
-                Button("Hide Pill") { SettingsStore.shared.showFloatingPill = false }
-            }
-            .help(isExpanded ? "Dictating — hover for Stop or Cancel" : "Click to start dictation")
-            .padding(.top, Self.insets.top)
-            .padding(.leading, Self.insets.left)
-            .padding(.bottom, Self.insets.bottom)
-            .padding(.trailing, Self.insets.right)
-            .background(
-                SoftShadowPillBackground(
-                    cornerRadius: cornerRadius,
-                    margin: Self.insets.edgeInsets,
-                    // Tighter shadow for the small resting pill; full depth once
-                    // the caption is expanded.
-                    shadowScale: 0.5 + 0.5 * morph,
-                    // Flat dark plate while dictating so the in-capsule glow
-                    // (and border beam) is continuous — no glass rim cut.
-                    glowFill: viewModel.isActive || viewModel.isProcessing
-                )
-            )
-            .opacity(shellOpacity)
-            .fixedSize()
+    /// Capsule the shell grows into: the caption's own size, since the caption
+    /// is laid out at its natural size.
+    private func targetCapsule(inWindowOf size: CGSize) -> CGSize {
+        CGSize(
+            width: size.width - Self.insets.left - Self.insets.right,
+            height: size.height - Self.insets.top - Self.insets.bottom
+        )
     }
 
-    private var captionSizeReader: some View {
+    /// The resting pill inflating into the caption.
+    private func animatingCapsule(target: CGSize) -> CGSize {
+        let full = CGSize(
+            width: max(Self.restingCapsule.width, target.width),
+            height: max(Self.restingCapsule.height, target.height)
+        )
+        return CGSize(
+            width: Self.restingCapsule.width + (full.width - Self.restingCapsule.width) * morph,
+            height: Self.restingCapsule.height + (full.height - Self.restingCapsule.height) * morph
+        )
+    }
+
+    private func cornerRadius(_ size: CGSize) -> CGFloat {
+        min(size.height / 2, Self.expandedCornerRadius)
+    }
+
+    /// Crops the caption to the animating capsule, pinned to the bottom-centre.
+    private var animatedCapsuleMask: some View {
         GeometryReader { proxy in
-            Color.clear.preference(key: CaptionSizeKey.self, value: proxy.size)
+            let size = animatingCapsule(target: proxy.size)
+            RoundedRectangle(cornerRadius: cornerRadius(size), style: .continuous)
+                .frame(width: size.width, height: size.height)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+        }
+    }
+
+    /// The capsule shell itself, behind the content. Sized to the animating
+    /// capsule so the shadow deepens as the bar grows.
+    private var capsuleShell: some View {
+        GeometryReader { proxy in
+            let size = animatingCapsule(target: targetCapsule(inWindowOf: proxy.size))
+            SoftShadowPillBackground(
+                cornerRadius: cornerRadius(size),
+                margin: Self.insets.nsEdgeInsets,
+                shadowScale: 0.28 + 0.72 * morph,
+                // Flat dark plate while dictating so the in-capsule glow
+                // (and border beam) is continuous — no glass rim cut.
+                glowFill: viewModel.isActive || viewModel.isProcessing
+            )
+            .frame(
+                width: size.width + Self.insets.left + Self.insets.right,
+                height: size.height + Self.insets.top + Self.insets.bottom
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+        }
+    }
+
+    /// Gestures live on the capsule alone: the transparent shadow bleed around
+    /// it must not start dictation. Deliberately draws nothing — a filled shape
+    /// here would sit on top of the caption and hide the transcript.
+    private var capsuleHitArea: some View {
+        GeometryReader { proxy in
+            let size = animatingCapsule(target: targetCapsule(inWindowOf: proxy.size))
+            let radius = cornerRadius(size)
+            Color.clear
+                .frame(width: size.width, height: size.height)
+                .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.18)) { viewModel.isHovering = hovering }
+                }
+                .onTapGesture { if !isExpanded { onToggle?() } }
+                .contextMenu {
+                    if viewModel.isActive {
+                        Button("Cancel Dictation") { onCancel?() }
+                    }
+                    Button("Hide Pill") { SettingsStore.shared.showFloatingPill = false }
+                }
+                .help(isExpanded ? "Dictating — hover for Stop or Cancel" : "Click to start dictation")
+                .padding(Self.insets.edgeInsets)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
     }
 
@@ -594,14 +621,6 @@ struct SubtitleView: View {
     }
 }
 
-/// Size of the caption content at its natural (unclipped) layout.
-private struct CaptionSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
 class SubtitleOverlay {
     static let shared = SubtitleOverlay()
 
@@ -622,12 +641,6 @@ class SubtitleOverlay {
     private init() {}
 
     private var isFloatingPillEnabled: Bool { SettingsStore.shared.showFloatingPill }
-
-    /// True while the window has to stay large enough for the expanded caption
-    /// shell. The morph animates only inside SwiftUI, so `morph` already reads 0
-    /// the instant a collapse *starts*; the window must wait for the animation
-    /// to land before it can shrink, or the shrinking shell would be clipped.
-    private var needsCaptionWindow = false
 
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -657,7 +670,7 @@ class SubtitleOverlay {
                 if self.viewModel.presentationPhase == .hidden {
                     self.viewModel.collapse()
                     self.viewModel.morph = 0
-                    self.needsCaptionWindow = false
+                    self.viewModel.expandedWindow = false
                 }
                 self.beginSpaceFollowing()
                 self.beginScreenParameterFollowing()
@@ -715,22 +728,26 @@ class SubtitleOverlay {
             self.beginSpaceFollowing()
             self.beginScreenParameterFollowing()
             // Size the window for the *expanded* shell before growing into it, so
-            // the morph never outgrows its window and never has to move.
-            self.needsCaptionWindow = true
+            // the morph never outgrows its window and never has to move. The
+            // view drops its resting frame as soon as `expandedWindow` is set,
+            // and that layout change lands on the next turn — so grow only after
+            // the window has actually been re-measured.
+            self.viewModel.expandedWindow = true
             self.repositionWindow()
-            if wasResting {
-                self.animateMorph(to: 1)
-            } else {
-                self.viewModel.morph = 1
-            }
             if let window = self.window {
                 SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
                     self.repositionWindow()
                 }
             }
-            // The caption's natural size arrives from the view a beat later
-            // (first show, before anything has been measured) — tighten up then.
-            DispatchQueue.main.async { self.repositionWindow() }
+            DispatchQueue.main.async {
+                guard self.viewModel.expandedWindow else { return }
+                self.repositionWindow()
+                if wasResting {
+                    self.animateMorph(to: 1)
+                } else {
+                    self.viewModel.morph = 1
+                }
+            }
         }
     }
 
@@ -768,11 +785,11 @@ class SubtitleOverlay {
                 if self.isFloatingPillEnabled {
                     self.viewModel.collapse()
                     self.viewModel.morph = 0
-                    self.needsCaptionWindow = false
+                    self.viewModel.expandedWindow = false
                     self.repositionWindow()
                     return
                 }
-                self.needsCaptionWindow = false
+                self.viewModel.expandedWindow = false
                 self.viewModel.finishHide()
                 self.spaceObserver.stop()
                 self.window?.orderOut(nil)
@@ -788,7 +805,7 @@ class SubtitleOverlay {
     /// Hand the window back to pill size once the collapse morph has landed.
     private func scheduleShrinkToRestingPill() {
         guard !reduceMotion else {
-            needsCaptionWindow = false
+            viewModel.expandedWindow = false
             viewModel.collapse()
             repositionWindow()
             return
@@ -797,7 +814,7 @@ class SubtitleOverlay {
             guard let self else { return }
             self.pendingShrink = nil
             guard self.isFloatingPillEnabled, self.viewModel.morph < 0.01 else { return }
-            self.needsCaptionWindow = false
+            self.viewModel.expandedWindow = false
             self.viewModel.collapse()
             self.repositionWindow()
         }
@@ -874,6 +891,33 @@ class SubtitleOverlay {
         AppDelegate.snapshot(window: window, to: path)
     }
 
+    /// Debug aid: renders the HUD's content *offscreen* at the size the
+    /// controller picked. A plain `NSHostingView` is not layer-backed, so
+    /// `cacheDisplay` actually draws it — unlike the live window, which renders
+    /// through layers and comes out blank without a WindowServer session.
+    func snapshotContentForDebug(to path: String) {
+        let size = window?.frame.size ?? .zero
+        guard size.width > 1, size.height > 1 else { return }
+        // The live window clears hover as soon as the pointer is elsewhere, so
+        // the hover actions can only be rendered by forcing the state here.
+        if ProcessInfo.processInfo.environment["TYPESTER_FORCE_HOVER"] != nil {
+            viewModel.isHovering = true
+        }
+        Debug.log(
+            "snapshot: size=\(Int(size.width))x\(Int(size.height))"
+                + " morph=\(String(format: "%.2f", viewModel.morph))"
+                + " hovering=\(viewModel.isHovering)"
+                + " captionWindow=\(viewModel.expandedWindow)"
+        )
+        let view = SubtitleView(
+            viewModel: viewModel,
+            onToggle: {},
+            onStop: {},
+            onCancel: {}
+        )
+        AppDelegate.snapshot(view: view, size: size, to: path)
+    }
+
     /// Debug aid for `TYPESTER_PILL_MODE=collapsed`: rest as the small pill
     /// without touching the user's settings.
     func demoCollapsedPill() {
@@ -883,7 +927,7 @@ class SubtitleOverlay {
             self.ensureWindow()
             self.viewModel.collapse()
             self.viewModel.morph = 0
-            self.needsCaptionWindow = false
+            self.viewModel.expandedWindow = false
             self.beginSpaceFollowing()
             self.beginScreenParameterFollowing()
             self.repositionWindow()
@@ -900,8 +944,7 @@ class SubtitleOverlay {
                 viewModel: viewModel,
                 onToggle: { [weak self] in self?.onToggle?() },
                 onStop: { [weak self] in self?.onStop?() },
-                onCancel: { [weak self] in self?.onCancel?() },
-                onContentSizeChange: { [weak self] in self?.repositionWindow() }
+                onCancel: { [weak self] in self?.onCancel?() }
             )
         )
 
@@ -920,6 +963,12 @@ class SubtitleOverlay {
         hosting.wantsLayer = true
         hosting.layer?.masksToBounds = false
         hosting.clipsToBounds = false
+        // NSHostingView otherwise imposes its content's *minimum* size on the
+        // window, so every explicit setFrame smaller than the caption was
+        // silently overridden and the window never matched the shell drawn
+        // inside it. Keeping only the intrinsic size leaves `fittingSize`
+        // accurate for sizing while giving the window back to us.
+        hosting.sizingOptions = [.intrinsicContentSize]
         window.contentView = hosting
 
         self.window = window
@@ -966,15 +1015,22 @@ class SubtitleOverlay {
         return screenWidth * 0.4
     }
 
-    /// Capsule the shell can reach right now. Before the caption has been
-    /// measured, assume the widest it can be so the window is never too small.
-    private var targetCapsule: CGSize {
-        let measured = viewModel.captionContentSize
-        let measuredKnown = measured.width > 1 && measured.height > 1
-        return CGSize(
-            width: max(SubtitleView.restingCapsule.width, measuredKnown ? measured.width : maxCapsuleWidth()),
-            height: max(SubtitleView.restingCapsule.height, measuredKnown ? measured.height : 120)
-        )
+    /// Capsule the shell can reach: the caption laid out at its natural size.
+    ///
+    /// The view's root is that caption plus the shadow insets, so `fittingSize`
+    /// is the caption's true size in every state — no measurement plumbing, and
+    /// no scrolling fallback while the content is still unknown.
+    private func captionWindowSize(_ hosting: NSHostingView<SubtitleView>) -> CGSize {
+        let fitting = hosting.fittingSize
+        guard fitting.width > 1, fitting.height > 1 else {
+            let screenWidth = NSScreen.main?.frame.width ?? 1440
+            let insets = SubtitleView.insets
+            return CGSize(
+                width: screenWidth * 0.4 + insets.left + insets.right,
+                height: 120 + insets.top + insets.bottom
+            )
+        }
+        return fitting
     }
 
     private func repositionWindow() {
@@ -992,11 +1048,12 @@ class SubtitleOverlay {
         let insets = SubtitleView.insets
         // Resting: exactly the pill. Otherwise the window has to fit the whole
         // morph, since the shell grows inside it without moving the window.
-        let capsule = needsCaptionWindow ? targetCapsule : SubtitleView.restingCapsule
-        let size = CGSize(
-            width: capsule.width + insets.left + insets.right,
-            height: capsule.height + insets.top + insets.bottom
-        )
+        let size = viewModel.expandedWindow
+            ? captionWindowSize(hosting)
+            : CGSize(
+                width: SubtitleView.restingCapsule.width + insets.left + insets.right,
+                height: SubtitleView.restingCapsule.height + insets.top + insets.bottom
+            )
 
         // Anchored to the configured edge, centered along it, and positioned so
         // the Dock can never cover the pill.
@@ -1009,7 +1066,7 @@ class SubtitleOverlay {
         )
         let newFrame = NSRect(origin: origin, size: size)
 
-        Debug.log("Overlay reposition: x=\(Int(origin.x)) y=\(Int(origin.y)) w=\(Int(size.width)) h=\(Int(size.height))")
+        Debug.log("Overlay reposition: x=\(Int(origin.x)) y=\(Int(origin.y)) w=\(Int(size.width)) h=\(Int(size.height)) captionWindow=\(viewModel.expandedWindow)")
 
         window.setFrame(newFrame, display: true)
     }
@@ -1036,7 +1093,11 @@ enum DockPreferencesReader {
 }
 
 extension PillInsets {
-    var edgeInsets: NSEdgeInsets {
+    var edgeInsets: EdgeInsets {
+        EdgeInsets(top: top, leading: left, bottom: bottom, trailing: right)
+    }
+
+    var nsEdgeInsets: NSEdgeInsets {
         NSEdgeInsets(top: top, left: left, bottom: bottom, right: right)
     }
 }
