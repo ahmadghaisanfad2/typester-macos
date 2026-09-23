@@ -639,6 +639,18 @@ struct SubtitleView: View {
     }
 }
 
+/// HUD panel that never activates Typester and never takes key focus.
+///
+/// Clicking the pill must not disturb the app the user is dictating into: if
+/// Typester becomes frontmost the field loses focus, the transcript is captured
+/// against the wrong app, and the paste goes nowhere. `.nonactivatingPanel` is
+/// what stops AppKit from activating the app on a click; the key overrides keep
+/// the panel from taking focus even so.
+final class DictationHUDPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 class SubtitleOverlay {
     static let shared = SubtitleOverlay()
 
@@ -966,9 +978,9 @@ class SubtitleOverlay {
             )
         )
 
-        let window = NSWindow(
+        let window = DictationHUDPanel(
             contentRect: .zero,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -976,6 +988,11 @@ class SubtitleOverlay {
         window.backgroundColor = .clear
         window.hasShadow = false
         SpaceFollowingWindow.configure(window)
+        // A panel hides itself whenever its app deactivates by default — and a
+        // non-activating panel's app is permanently deactivated by design, so
+        // without this it would work only while Typester happened to be
+        // frontmost and vanish in real use.
+        window.hidesOnDeactivate = false
         window.acceptsMouseMovedEvents = true
         window.ignoresMouseEvents = false
         hosting.wantsLayer = true
@@ -990,6 +1007,14 @@ class SubtitleOverlay {
         window.contentView = hosting
 
         self.window = window
+        Debug.log(
+            "HUD window configured: nonactivatingPanel="
+                + "\(window.styleMask.contains(.nonactivatingPanel))"
+                + " canBecomeKey=\(window.canBecomeKey)"
+                + " canBecomeMain=\(window.canBecomeMain)"
+                + " hidesOnDeactivate=\(window.hidesOnDeactivate)"
+                + " level=\(window.level.rawValue)"
+        )
         beginScreenParameterFollowing()
     }
 
