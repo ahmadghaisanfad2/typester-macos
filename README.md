@@ -16,7 +16,7 @@ Features:
 - **Multiple providers** — Choose Soniox, Deepgram, OpenAI, OpenRouter, or xAI for speech recognition
 - **Press-to-speak** — Hold a key to dictate, release to paste (default mode; pick any side of ⌘ ⌥ ⌃ ⇧ or Fn)
 - **Toggle mode** — Or use a global hotkey to start/stop recording (triple-tap ⌘⌘⌘ or record any custom shortcut combo)
-- **Floating pill** — Optional Wispr-style always-on-top pill: click to start/stop dictation, drag it anywhere
+- **Floating pill** — Optional Wispr-style always-on-top pill: click to start/stop dictation. It rests centered above the Dock (edge configurable in Settings) and expands into the live caption bar while dictating
 - **Cancel with Esc** — Press Escape while dictating to discard the transcript without pasting
 - **Filler-word cleanup** — Optional removal of hesitation fillers (uh, um, you know, I mean…) before paste
 - **Real-time transcription** — Streaming APIs (Soniox `stt-rt-v5`, Deepgram `nova-3`, OpenAI `gpt-live-transcribe` and related models); xAI offers real-time WebSocket or async batch modes (`grok-voice-transcribe-2.0`); OpenRouter uses batch transcription with a live model catalog
@@ -171,6 +171,7 @@ Sources/
 ├── DictionarySmoke/                # CLI smoke checks (no XCTest required)
 ├── TypesterLogic/                  # Non-UI core (builds with Command Line Tools)
 │   ├── Models.swift                # Data models + DictionaryHelpers
+│   ├── PillAnchorPolicy.swift      # Floating pill edge anchoring (Dock-aware, pure)
 │   ├── SettingsStore.swift         # UserDefaults + Keychain persistence
 │   ├── HotkeyManager.swift         # Global hotkey registration (Carbon Events)
 │   ├── PressKeyMonitor.swift       # Press-to-speak key detection (CGEventTap)
@@ -196,11 +197,12 @@ Sources/
     ├── SettingsView.swift          # Sidebar-based settings interface
     ├── OnboardingView.swift        # First-run setup wizard
     ├── TeachDictionaryView.swift   # Teach wrong→right correction UI
-    ├── SubtitleOverlay.swift       # Live subtitle overlay
+    ├── SubtitleOverlay.swift       # Floating pill + live caption HUD (morphs between states)
     └── Exports.swift               # Re-exports TypesterCore logic
 
 Tests/
 ├── ModelsTests.swift               # Model encoding/decoding tests
+├── PillAnchorPolicyTests.swift     # Floating pill edge / Dock anchoring tests
 ├── KeyboardUtilsTests.swift        # Keyboard utility tests
 ├── DictionaryHelpersTests.swift    # Correction / context helper tests
 ├── UpdateCheckerTests.swift        # Version compare + release parsing tests

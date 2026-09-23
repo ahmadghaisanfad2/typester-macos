@@ -214,7 +214,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Environment-driven hooks used for automated visual checks:
     /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
-    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting,
+    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting|collapsed,
     /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png,
     /// TYPESTER_QA_PASTE=… (exercise the real paste/learning path after launch),
     /// TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE=1 (render the migration alert),
@@ -317,6 +317,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func demoPill(mode: String) {
+        if mode == "collapsed" {
+            subtitleOverlay.demoCollapsedPill()
+            return
+        }
         let notesIcon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
         subtitleOverlay.show(appName: "Notes", appIcon: notesIcon)
         switch mode {
@@ -409,28 +413,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateSTTProvider()
         rebuildMenu()
         updateActivationPolicy()
-        FloatingDictationPill.shared.showIfNeeded()
+        subtitleOverlay.refreshFloatingPresence()
     }
 
     @objc private func floatingPillVisibilityChanged() {
-        FloatingDictationPill.shared.showIfNeeded()
+        subtitleOverlay.refreshFloatingPresence()
     }
 
     // MARK: - Floating pill
 
     private func setupFloatingPill() {
-        FloatingDictationPill.shared.onToggleDictation = { [weak self] in
+        subtitleOverlay.onToggle = { [weak self] in
             self?.toggleRecording()
         }
-        FloatingDictationPill.shared.onCancelDictation = { [weak self] in
+        subtitleOverlay.onCancel = { [weak self] in
             self?.cancelActiveTranscription()
         }
-        FloatingDictationPill.shared.showIfNeeded()
-    }
-
-    private func resetFloatingPill() {
-        FloatingDictationPill.shared.setRecording(false)
-        FloatingDictationPill.shared.setProcessing(false)
+        subtitleOverlay.refreshFloatingPresence()
     }
 
     // MARK: - Accessibility recovery
@@ -658,7 +657,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.sessionDiscarded = false
                 self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
-                self.resetFloatingPill()
                 self.sttProvider.disconnect()
                 return
             }
@@ -669,7 +667,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.pasteAccumulatedTranscript(saveHistory: true)
             self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
-            self.resetFloatingPill()
             self.sttProvider.disconnect()
         }
 
@@ -685,7 +682,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.statusItem.button?.image = self.normalIcon
                 self.disarmEscapeCancel()
                 self.subtitleOverlay.hide()
-                self.resetFloatingPill()
                 self.audioRecorder.stopRecording()
                 self.sttProvider.disconnect()
                 return
@@ -700,7 +696,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.statusItem.button?.image = self.normalIcon
             self.disarmEscapeCancel()
             self.subtitleOverlay.hide()
-            self.resetFloatingPill()
             self.audioRecorder.stopRecording()
             let current = TranscriptPastePayload.resolve(
                 accumulatedText: self.accumulatedText,
@@ -959,7 +954,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.image = normalIcon
         disarmEscapeCancel()
         subtitleOverlay.hide()
-        resetFloatingPill()
 
         let current = currentSessionText()
         let historyText: String
@@ -1811,7 +1805,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         audioRecorder.onAudioLevel = { [weak self] level in
             self?.subtitleOverlay.updateLevel(level)
-            FloatingDictationPill.shared.setLevel(level)
         }
 
         audioRecorder.onError = { [weak self] _ in
@@ -1901,7 +1894,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appIcon = frontApp?.icon
         sessionAppName = appName
         subtitleOverlay.show(appName: appName, appIcon: appIcon)
-        FloatingDictationPill.shared.setRecording(true, appName: appName)
         armEscapeCancel()
 
         syncAudioSampleRate()
@@ -1930,7 +1922,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Compact spinner while any provider finishes (async upload, OpenAI commit, etc.).
         subtitleOverlay.showProcessing()
-        FloatingDictationPill.shared.setProcessing(true)
 
         if isRecovering {
             recoveryLock.withLock {
@@ -2000,7 +1991,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         audioRecorder.stopRecording()
         disarmEscapeCancel()
         subtitleOverlay.hide()
-        resetFloatingPill()
         sttProvider.disconnect()
     }
 

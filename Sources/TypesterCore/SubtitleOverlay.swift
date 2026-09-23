@@ -1,9 +1,13 @@
 import Cocoa
+import QuartzCore
 import SwiftUI
 import TypesterCore
 
 enum SubtitlePresentationPhase: Equatable {
     case hidden
+    /// Resting state of the floating pill: a small idle capsule on screen,
+    /// click to start dictation. Only used when `showFloatingPill` is on.
+    case collapsed
     case presenting
     case visible
     case dismissing
@@ -97,6 +101,24 @@ class SubtitleViewModel: ObservableObject {
         targetAppIcon = nil
         spectrumTargets.reset()
         voiceGlow.reset()
+    }
+
+    /// Morph the expanded caption back into the resting pill, keeping the
+    /// window on screen. Used instead of `finishHide()` when the floating pill
+    /// is enabled, so the HUD never disappears between dictations.
+    func collapse() {
+        isActive = false
+        isProcessing = false
+        processingLabel = "Transcribing"
+        isHovering = false
+        finalText = ""
+        interimText = ""
+        targetAppName = ""
+        targetAppIcon = nil
+        spectrumTargets.reset()
+        voiceGlow.setProcessing(false)
+        voiceGlow.reset()
+        presentationPhase = .collapsed
     }
 
     func updateFinal(_ text: String) {
@@ -299,10 +321,63 @@ struct WaveformIcon: View {
 
 struct SubtitleView: View {
     @ObservedObject var viewModel: SubtitleViewModel
+    var onToggle: (() -> Void)?
     var onCancel: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
+    /// Resting pill geometry: the drawn capsule is `collapsedCapsule`, and the
+    /// window is larger by `collapsedInsets` so the baked shadow is not clipped.
+    static let collapsedCapsule = CGSize(width: 44, height: 24)
+    static let collapsedInsets = PillInsets(top: 10, left: 14, bottom: 16, right: 14)
+    static let expandedInsets = PillInsets(top: 36, left: 44, bottom: 44, right: 44)
+
     var body: some View {
+        Group {
+            if viewModel.presentationPhase == .collapsed {
+                collapsedPill.transition(.opacity)
+            } else {
+                expandedPill.transition(.opacity)
+            }
+        }
+        .animation(presentationAnimation, value: viewModel.presentationPhase)
+    }
+
+    /// Idle resting pill: a small capsule with no logo and no text.
+    private var collapsedPill: some View {
+        Image(systemName: "mic.fill")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.78))
+            .frame(width: Self.collapsedCapsule.width, height: Self.collapsedCapsule.height)
+            // Hit area stays the capsule itself; the transparent shadow bleed
+            // around it must not start dictation.
+            .contentShape(Capsule(style: .continuous))
+            .onHover { viewModel.isHovering = $0 }
+            .onTapGesture { onToggle?() }
+            .contextMenu {
+                if viewModel.isActive {
+                    Button("Cancel Dictation") { onCancel?() }
+                }
+                Button("Hide Pill") { SettingsStore.shared.showFloatingPill = false }
+            }
+            .help("Click to start dictation")
+            .padding(.top, Self.collapsedInsets.top)
+            .padding(.leading, Self.collapsedInsets.left)
+            .padding(.bottom, Self.collapsedInsets.bottom)
+            .padding(.trailing, Self.collapsedInsets.right)
+            .background(
+                SoftShadowPillBackground(
+                    cornerRadius: Self.collapsedCapsule.height / 2,
+                    margin: Self.collapsedInsets.edgeInsets,
+                    shadowScale: 0.5
+                )
+            )
+            .scaleEffect(viewModel.isHovering ? 1.05 : 1)
+            .animation(.easeOut(duration: 0.12), value: viewModel.isHovering)
+            .fixedSize()
+    }
+
+    /// Expanded caption bar: waveform + live transcript + Voice glow.
+    private var expandedPill: some View {
         // Pad first so SoftShadowPillBackground is large enough for a real CG Gaussian
         // fade; the capsule is drawn inset by the same margins as this padding.
         // Voice glow is a masked in-capsule background — not an outer bloom.
@@ -310,13 +385,13 @@ struct SubtitleView: View {
             .background {
                 voiceGlowLayer
             }
-            .padding(.horizontal, 44)
-            .padding(.top, 36)
-            .padding(.bottom, 44)
+            .padding(.horizontal, Self.expandedInsets.left)
+            .padding(.top, Self.expandedInsets.top)
+            .padding(.bottom, Self.expandedInsets.bottom)
             .background(
                 SoftShadowPillBackground(
                     cornerRadius: 20,
-                    margin: NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44),
+                    margin: Self.expandedInsets.edgeInsets,
                     // Flat dark plate while dictating so the in-capsule glow
                     // (and border beam) is continuous — no glass rim cut.
                     glowFill: viewModel.isActive
@@ -326,7 +401,6 @@ struct SubtitleView: View {
             .opacity(presentationOpacity)
             .scaleEffect(presentationScale, anchor: .bottom)
             .offset(y: presentationOffset)
-            .animation(presentationAnimation, value: viewModel.presentationPhase)
     }
 
     @ViewBuilder
@@ -352,6 +426,7 @@ struct SubtitleView: View {
     private var presentationScale: CGFloat {
         switch viewModel.presentationPhase {
         case .hidden: return 0.94
+        case .collapsed: return 1
         case .presenting: return 0.88
         case .visible: return 1
         case .dismissing: return 0.94
@@ -365,6 +440,7 @@ struct SubtitleView: View {
     private var presentationOffset: CGFloat {
         switch viewModel.presentationPhase {
         case .hidden: return 8
+        case .collapsed: return 0
         case .presenting: return 10
         case .visible: return 0
         case .dismissing: return 9
@@ -496,34 +572,98 @@ class SubtitleOverlay {
     private var window: NSWindow?
     private var pendingHide: DispatchWorkItem?
     private let dismissalDuration: TimeInterval = 0.36
+    /// Matches the window-frame animation of the pill ↔ caption morph.
+    private let morphDuration: TimeInterval = 0.26
     private let spaceObserver = SpaceFollowingWindow.SpaceObserver()
+    private var screenParametersToken: NSObjectProtocol?
+    var onToggle: (() -> Void)?
     var onCancel: (() -> Void)?
 
     private init() {}
+
+    private var isFloatingPillEnabled: Bool { SettingsStore.shared.showFloatingPill }
+
+    /// Match the on-screen presence to the `showFloatingPill` / `pillEdge`
+    /// settings: rest as the small pill when enabled, disappear when disabled.
+    func refreshFloatingPresence() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.isFloatingPillEnabled {
+                self.pendingHide?.cancel()
+                self.pendingHide = nil
+                let wasHidden = self.window?.isVisible != true
+                self.ensureWindow()
+                if self.viewModel.presentationPhase == .hidden {
+                    self.viewModel.collapse()
+                }
+                self.beginSpaceFollowing()
+                self.beginScreenParameterFollowing()
+                self.repositionWindow(animated: false)
+                guard let window = self.window else { return }
+                if wasHidden {
+                    window.alphaValue = 0
+                    window.orderFrontRegardless()
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.18
+                        window.animator().alphaValue = 1
+                    }
+                } else {
+                    window.orderFrontRegardless()
+                }
+            } else if self.viewModel.presentationPhase == .collapsed {
+                self.dismissPill()
+            }
+        }
+    }
+
+    /// Setting turned off while resting: fade the pill out and order it away.
+    private func dismissPill() {
+        guard let window else {
+            viewModel.finishHide()
+            return
+        }
+        pendingHide?.cancel()
+        pendingHide = nil
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.16
+            window.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            self.viewModel.finishHide()
+            self.spaceObserver.stop()
+            window.orderOut(nil)
+            window.alphaValue = 1
+        })
+    }
 
     func show(appName: String, appIcon: NSImage?) {
         DispatchQueue.main.async {
             self.pendingHide?.cancel()
             self.pendingHide = nil
             self.viewModel.maxCapsuleWidth = self.maxCapsuleWidth()
+            let wasResting = self.viewModel.presentationPhase == .collapsed
             self.viewModel.show(appName: appName, appIcon: appIcon)
             self.ensureWindow()
             self.beginSpaceFollowing()
-            // Multi-pass reaffirm keeps the non-activating HUD on the active Space
-            // across swipe transitions and activation-policy flips.
+            self.beginScreenParameterFollowing()
+            // Morph first. The Space reassert passes reposition too, so handing
+            // them a non-animated reposition would snap the frame to its final
+            // size and cut the morph on its first pass.
+            self.repositionWindow(animated: wasResting)
             if let window = self.window {
                 SpaceFollowingWindow.reaffirmWithTransitionPasses(window) {
-                    self.repositionWindow()
+                    self.repositionWindow(animated: wasResting)
                 }
             }
-            // First lay out the compact starting state, then animate to the
-            // resting state on the next runloop. This keeps the shadow and
-            // window frame stable while the pill does its small spring pop.
-            self.repositionWindow()
+            // Settle into the resting state on the next runloop. Presenting and
+            // visible share a layout size, so only an un-morphed frame needs
+            // re-fitting here.
             DispatchQueue.main.async {
                 guard self.viewModel.presentationPhase == .presenting else { return }
                 self.viewModel.present()
-                self.repositionWindow()
+                if !wasResting {
+                    self.repositionWindow(animated: false)
+                }
             }
         }
     }
@@ -537,15 +677,32 @@ class SubtitleOverlay {
             }
 
             self.pendingHide?.cancel()
+            self.pendingHide = nil
+
+            // With the floating pill enabled the caption morphs straight back
+            // into the resting pill instead of dismissing the window.
+            if self.isFloatingPillEnabled {
+                self.viewModel.collapse()
+                self.repositionWindow(animated: true)
+                return
+            }
+
             self.viewModel.beginDismissal()
-            self.repositionWindow()
+            self.repositionWindow(animated: false)
 
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
+                self.pendingHide = nil
+                // The pill may have been enabled while the caption was fading
+                // out; rest as the pill instead of ordering the window away.
+                if self.isFloatingPillEnabled {
+                    self.viewModel.collapse()
+                    self.repositionWindow(animated: true)
+                    return
+                }
                 self.viewModel.finishHide()
                 self.spaceObserver.stop()
                 self.window?.orderOut(nil)
-                self.pendingHide = nil
             }
             self.pendingHide = workItem
             DispatchQueue.main.asyncAfter(
@@ -624,6 +781,21 @@ class SubtitleOverlay {
         AppDelegate.snapshot(window: window, to: path)
     }
 
+    /// Debug aid for `TYPESTER_PILL_MODE=collapsed`: rest as the small pill
+    /// without touching the user's settings.
+    func demoCollapsedPill() {
+        DispatchQueue.main.async {
+            self.pendingHide?.cancel()
+            self.pendingHide = nil
+            self.ensureWindow()
+            self.viewModel.collapse()
+            self.beginSpaceFollowing()
+            self.beginScreenParameterFollowing()
+            self.repositionWindow(animated: false)
+            self.window?.orderFrontRegardless()
+        }
+    }
+
     private func ensureWindow() {
         guard window == nil else { return }
 
@@ -631,6 +803,7 @@ class SubtitleOverlay {
         let hosting = NSHostingView(
             rootView: SubtitleView(
                 viewModel: viewModel,
+                onToggle: { [weak self] in self?.onToggle?() },
                 onCancel: { [weak self] in self?.onCancel?() }
             )
         )
@@ -653,14 +826,15 @@ class SubtitleOverlay {
         window.contentView = hosting
 
         self.window = window
+        beginScreenParameterFollowing()
     }
 
     private func beginSpaceFollowing() {
         spaceObserver.start(
             shouldReassert: { [weak self] in
                 guard let self, self.window != nil else { return false }
-                // Reassert for the whole on-screen lifecycle, including
-                // presenting/dismissing — not only the fully visible phase.
+                // Reassert for the whole on-screen lifecycle, including the
+                // resting pill — not only the fully visible phase.
                 return self.viewModel.presentationPhase != .hidden
             },
             handler: { [weak self] in
@@ -672,19 +846,40 @@ class SubtitleOverlay {
         )
     }
 
+    /// Re-anchor when the Dock is hidden / shown / moved / resized, or the
+    /// display changes. `visibleFrame` is what makes the pill Dock-aware, and
+    /// this notification is the only signal needed — no polling, no timers.
+    private func beginScreenParameterFollowing() {
+        guard screenParametersToken == nil else { return }
+        screenParametersToken = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.window != nil else { return }
+            guard self.viewModel.presentationPhase != .hidden else { return }
+            self.repositionWindow(animated: true)
+        }
+    }
+
     private func maxCapsuleWidth() -> CGFloat {
         let screenWidth = NSScreen.main?.frame.width ?? 1440
         return screenWidth * 0.4
     }
 
-    private func repositionWindow() {
+    private func repositionWindow(animated: Bool = false) {
         guard let window = window,
               let screen = NSScreen.main,
               let hosting = window.contentView as? NSHostingView<SubtitleView> else { return }
 
-        let maxWidth = maxCapsuleWidth()
-        if abs(viewModel.maxCapsuleWidth - maxWidth) > 0.5 {
-            viewModel.maxCapsuleWidth = maxWidth
+        let isCollapsed = viewModel.presentationPhase == .collapsed
+        let insets = isCollapsed ? SubtitleView.collapsedInsets : SubtitleView.expandedInsets
+
+        if !isCollapsed {
+            let maxWidth = maxCapsuleWidth()
+            if abs(viewModel.maxCapsuleWidth - maxWidth) > 0.5 {
+                viewModel.maxCapsuleWidth = maxWidth
+            }
         }
 
         // Do not replace hosting.rootView — that remounts WaveformIcon and breaks animation.
@@ -693,17 +888,40 @@ class SubtitleOverlay {
         let fittingSize = hosting.fittingSize
         guard fittingSize.width > 0 && fittingSize.height > 0 else { return }
 
+        // Borderless windows are not content-sized: the frame must follow the
+        // phase, or the resting pill would swallow clicks across the caption's
+        // much larger transparent area.
         let shadowPad: CGFloat = 68
-        let width = min(fittingSize.width, maxWidth + shadowPad)
+        let width = isCollapsed ? fittingSize.width : min(fittingSize.width, maxCapsuleWidth() + shadowPad)
         let height = fittingSize.height
 
-        let x = screen.frame.midX - width / 2
-        // Extra bottom padding is for the baked shadow fade; keep the capsule near the dock.
-        let y = screen.frame.minY + 48
-        let newFrame = NSRect(origin: NSPoint(x: x, y: y), size: NSSize(width: width, height: height))
+        // Anchored to the configured edge, centered along it, positioned from
+        // `visibleFrame` so the Dock is always respected.
+        let origin = PillAnchorPolicy.origin(
+            windowSize: CGSize(width: width, height: height),
+            screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame,
+            edge: SettingsStore.shared.pillEdge,
+            insets: insets
+        )
+        let newFrame = NSRect(origin: origin, size: NSSize(width: width, height: height))
 
-        Debug.log("Overlay reposition: x=\(Int(x)) y=\(Int(y)) w=\(Int(width)) h=\(Int(height))")
+        Debug.log("Overlay reposition: x=\(Int(origin.x)) y=\(Int(origin.y)) w=\(Int(width)) h=\(Int(height))")
 
-        window.setFrame(newFrame, display: true)
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            window.setFrame(newFrame, display: true)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = morphDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(newFrame, display: true)
+        }
+    }
+}
+
+extension PillInsets {
+    var edgeInsets: NSEdgeInsets {
+        NSEdgeInsets(top: top, left: left, bottom: bottom, right: right)
     }
 }
