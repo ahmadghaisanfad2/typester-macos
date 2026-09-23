@@ -629,17 +629,34 @@ struct SettingsView: View {
 
             SettingsSection(
                 "Floating pill",
-                footer: "A small always-on-top pill you can click to start or stop dictation — similar to Wispr Flow. Drag it anywhere on screen."
+                footer: "A small always-on-top pill you can click to start or stop dictation — similar to Wispr Flow. While dictating it expands into the live caption bar. Its position always clears the Dock."
             ) {
                 SettingsRow(
                     "Show floating pill",
                     help: "Keep a clickable pill on screen as an alternative to the hotkey.",
-                    showsDivider: false
+                    showsDivider: settings.showFloatingPill
                 ) {
                     Toggle("", isOn: $settings.showFloatingPill)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .tint(Codex.green)
+                }
+
+                if settings.showFloatingPill {
+                    SettingsRow(
+                        "Position",
+                        help: "Edge the pill rests against, centered along it.",
+                        showsDivider: false
+                    ) {
+                        Picker("Position", selection: $settings.pillEdge) {
+                            ForEach(PillEdge.allCases, id: \.self) { edge in
+                                Text(edge.displayName).tag(edge)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(width: 160)
+                    }
                 }
             }
         }

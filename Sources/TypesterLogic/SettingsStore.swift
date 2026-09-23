@@ -211,6 +211,14 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Screen edge the floating pill rests against (centered along it).
+    @Published public var pillEdge: PillEdge = .bottom {
+        didSet {
+            UserDefaults.standard.set(pillEdge.rawValue, forKey: pillEdgeKey)
+            NotificationCenter.default.post(name: .floatingPillVisibilityChanged, object: nil)
+        }
+    }
+
     /// Prefer the dictating user’s voice: keep only the first speaker after you
     /// start dictating (Soniox/Deepgram diarization). Noise isolation is left to
     /// the macOS mic mode — Apple voice processing on the mic path captures
@@ -247,6 +255,7 @@ public class SettingsStore: ObservableObject {
     private let removeFillerWordsKey = "removeFillerWords"
     private let transcriptStyleKey = "transcriptStyle"
     private let showFloatingPillKey = "showFloatingPill"
+    private let pillEdgeKey = "pillEdge"
     private let showInDockKey = "showInDock"
     private let focusOnMyVoiceKey = "focusOnMyVoice"
     private let keychainService = "com.typester.api"
@@ -549,6 +558,10 @@ public class SettingsStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: showFloatingPillKey) != nil {
             showFloatingPill = UserDefaults.standard.bool(forKey: showFloatingPillKey)
+        }
+        if let raw = UserDefaults.standard.string(forKey: pillEdgeKey),
+           let edge = PillEdge(rawValue: raw) {
+            pillEdge = edge
         }
         if UserDefaults.standard.object(forKey: showInDockKey) != nil {
             showInDock = UserDefaults.standard.bool(forKey: showInDockKey)

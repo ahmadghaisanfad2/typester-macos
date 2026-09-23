@@ -7,6 +7,9 @@ final class SoftShadowPillNSView: NSView {
     var cornerRadius: CGFloat = 20
     /// Clear margin around the capsule where the shadow may fade.
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+    /// Multiplies both shadow blurs and offsets. Smaller pills need a tighter
+    /// shadow so the fade still fits inside their (much smaller) margin.
+    var shadowScale: CGFloat = 1
     /// When true (Voice glow active): flat dark fill, no glass rim — keeps the
     /// in-capsule glow fluid instead of cutting it with a bright edge plate.
     var glowFill: Bool = false
@@ -49,8 +52,8 @@ final class SoftShadowPillNSView: NSView {
         // Two shadow passes: a wide ambient occlusion plus a tighter key shadow.
         context.saveGState()
         context.setShadow(
-            offset: CGSize(width: 0, height: -7),
-            blur: 24,
+            offset: CGSize(width: 0, height: -7 * shadowScale),
+            blur: 24 * shadowScale,
             color: NSColor.black.withAlphaComponent(0.28).cgColor
         )
         context.addPath(path)
@@ -60,8 +63,8 @@ final class SoftShadowPillNSView: NSView {
 
         context.saveGState()
         context.setShadow(
-            offset: CGSize(width: 0, height: -2),
-            blur: 9,
+            offset: CGSize(width: 0, height: -2 * shadowScale),
+            blur: 9 * shadowScale,
             color: NSColor.black.withAlphaComponent(0.20).cgColor
         )
         context.addPath(path)
@@ -124,12 +127,14 @@ final class SoftShadowPillNSView: NSView {
 struct SoftShadowPillBackground: NSViewRepresentable {
     var cornerRadius: CGFloat = 20
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
+    var shadowScale: CGFloat = 1
     var glowFill: Bool = false
 
     func makeNSView(context: Context) -> SoftShadowPillNSView {
         let view = SoftShadowPillNSView()
         view.cornerRadius = cornerRadius
         view.margin = margin
+        view.shadowScale = shadowScale
         view.glowFill = glowFill
         return view
     }
@@ -137,6 +142,7 @@ struct SoftShadowPillBackground: NSViewRepresentable {
     func updateNSView(_ nsView: SoftShadowPillNSView, context: Context) {
         nsView.cornerRadius = cornerRadius
         nsView.margin = margin
+        nsView.shadowScale = shadowScale
         nsView.glowFill = glowFill
         nsView.needsDisplay = true
     }

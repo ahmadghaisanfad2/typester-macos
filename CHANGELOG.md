@@ -2,6 +2,19 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.0] — 2026-09-23
+
+### Added
+- **The floating pill now morphs into the caption bar.** The click pill and the live-transcript capsule were two separate floating windows that could drift apart on screen. They are now one HUD: a small capsule that expands into the waveform + live transcript bar the moment dictation starts — by hotkey or by clicking the pill — and shrinks back to the pill when you stop. The transition is animated in place, anchored to the same edge.
+- **The pill sits above the Dock, centered, and follows it.** Its resting position is computed from the screen's visible area instead of a hardcoded bottom-right corner, so it clears a pinned Dock, drops when the Dock is auto-hidden, and re-centers when the Dock moves to the left or right. It re-anchors on Dock and display changes without polling.
+- **Settings → Floating pill → Position** picks the edge the pill rests against (**Bottom**, **Top**, **Left**, **Right**), always centered along that edge.
+
+### Changed
+- The caption bar also respects the Dock now: it used to be placed from the raw screen edge, so a pinned Dock could overlap it.
+
+### Removed
+- The separate floating-pill window and its view model, folded into the caption overlay so the two can no longer disagree about position or state.
+
 ## [1.24.2] — 2026-09-23
 
 ### Fixed
