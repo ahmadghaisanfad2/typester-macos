@@ -125,6 +125,46 @@ public enum DockReserve {
     }
 }
 
+/// Where the two hover actions sit inside the expanded capsule.
+///
+/// The capsule is one interactive surface: hover and taps are handled by a
+/// single view, and a tap is routed to Stop or Cancel by point. That only works
+/// if the layout and the router agree on the same rects, so they are computed
+/// here — once, and unit-tested.
+public enum PillActionsLayout {
+    public static let horizontalInset: CGFloat = 10
+    public static let verticalInset: CGFloat = 5
+    public static let spacing: CGFloat = 8
+
+    /// Action rects in the capsule's own coordinate space (origin top-left).
+    public static func actionRects(in size: CGSize) -> (stop: CGRect, cancel: CGRect) {
+        let available = size.width - horizontalInset * 2 - spacing
+        let width = max(0, available / 2)
+        let height = max(0, size.height - verticalInset * 2)
+        let stop = CGRect(x: horizontalInset, y: verticalInset, width: width, height: height)
+        let cancel = CGRect(
+            x: horizontalInset + width + spacing,
+            y: verticalInset,
+            width: width,
+            height: height
+        )
+        return (stop, cancel)
+    }
+
+    /// Which action a tap at `point` means, if any.
+    public enum Action: Equatable {
+        case stop
+        case cancel
+    }
+
+    public static func action(at point: CGPoint, in size: CGSize) -> Action? {
+        let rects = actionRects(in: size)
+        if rects.stop.contains(point) { return .stop }
+        if rects.cancel.contains(point) { return .cancel }
+        return nil
+    }
+}
+
 /// Pure policy for anchoring the floating pill window.
 ///
 /// Uses the *effective* visible frame (see `DockReserve.visibleFrame`) rather

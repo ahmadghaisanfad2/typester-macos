@@ -151,6 +151,71 @@ final class PillAnchorPolicyTests: XCTestCase {
     }
 }
 
+final class PillActionsLayoutTests: XCTestCase {
+    private let size = CGSize(width: 356, height: 40)
+
+    func testRectsFillTheCapsuleWithEvenInsets() {
+        let rects = PillActionsLayout.actionRects(in: size)
+
+        XCTAssertEqual(rects.stop.minX, PillActionsLayout.horizontalInset, accuracy: 0.001)
+        XCTAssertEqual(rects.stop.minY, PillActionsLayout.verticalInset, accuracy: 0.001)
+        XCTAssertEqual(
+            size.width - rects.cancel.maxX,
+            PillActionsLayout.horizontalInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            size.height - rects.stop.maxY,
+            PillActionsLayout.verticalInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(rects.stop.width, rects.cancel.width, accuracy: 0.001)
+        XCTAssertEqual(rects.stop.height, rects.cancel.height, accuracy: 0.001)
+    }
+
+    func testActionsDoNotOverlapAndStayInsideTheCapsule() {
+        let rects = PillActionsLayout.actionRects(in: size)
+
+        XCTAssertFalse(rects.stop.intersects(rects.cancel))
+        XCTAssertGreaterThan(rects.cancel.minX, rects.stop.maxX - 0.001)
+        XCTAssertTrue(CGRect(origin: .zero, size: size).contains(rects.stop))
+        XCTAssertTrue(CGRect(origin: .zero, size: size).contains(rects.cancel))
+    }
+
+    func testClicksRouteToTheActionUnderThePoint() {
+        let rects = PillActionsLayout.actionRects(in: size)
+
+        XCTAssertEqual(
+            PillActionsLayout.action(at: CGPoint(x: rects.stop.midX, y: rects.stop.midY), in: size),
+            .stop
+        )
+        XCTAssertEqual(
+            PillActionsLayout.action(at: CGPoint(x: rects.cancel.midX, y: rects.cancel.midY), in: size),
+            .cancel
+        )
+    }
+
+    func testRutsAndGapsRouteNowhere() {
+        let rects = PillActionsLayout.actionRects(in: size)
+
+        // The gap between the two actions.
+        XCTAssertNil(PillActionsLayout.action(at: CGPoint(x: rects.stop.maxX + 4, y: 20), in: size))
+        // The inset margin along the bottom edge.
+        XCTAssertNil(PillActionsLayout.action(at: CGPoint(x: rects.stop.midX, y: 2), in: size))
+        XCTAssertNil(PillActionsLayout.action(at: CGPoint(x: 2, y: 20), in: size))
+    }
+
+    func testDegenerateCapsuleNeverProducesNegativeRects() {
+        for width in [CGFloat(0), 8, 20, 40] {
+            let rects = PillActionsLayout.actionRects(in: CGSize(width: width, height: 14))
+            XCTAssertGreaterThanOrEqual(rects.stop.width, 0)
+            XCTAssertGreaterThanOrEqual(rects.cancel.width, 0)
+            XCTAssertGreaterThanOrEqual(rects.stop.height, 0)
+            XCTAssertGreaterThanOrEqual(rects.cancel.height, 0)
+        }
+    }
+}
+
 final class DockReserveTests: XCTestCase {
     private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
     private let insets = PillInsets(top: 26, left: 34, bottom: 32, right: 34)

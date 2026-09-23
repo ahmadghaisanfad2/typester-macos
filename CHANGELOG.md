@@ -2,6 +2,14 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.4] — 2026-09-23
+
+### Fixed
+- **The hover actions flickered on and off under the pointer.** Two hit-testable layers were competing for the pointer: the moment the buttons appeared they took the hover away from the capsule surface underneath, which hid them again. The capsule is now a *single* interactive surface, the actions are inert drawings, and a tap is routed to **Stop** or **Cancel** by point — against the same rects that are drawn, covered by `PillActionsLayoutTests`.
+
+### Changed
+- The capsule no longer shrinks under the pointer while the actions are showing. It keeps its size and the actions fill it, so there is nothing to chase and no dead space.
+
 ## [1.25.3] — 2026-09-23
 
 ### Fixed
