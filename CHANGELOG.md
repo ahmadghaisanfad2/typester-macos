@@ -2,6 +2,11 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.5] — 2026-09-23
+
+### Fixed
+- **Clicking the pill brought Typester to the front**, so the field you were dictating into lost its caret, the transcript was attributed to Typester instead of your app, and nothing pasted. The HUD was a plain borderless `NSWindow`: `canBecomeKey = false` only stops a window taking *key* focus — clicking any window still activates its app. The HUD is now an `NSPanel` subclass with the `.nonactivatingPanel` style mask, so clicks reach it without activating Typester, and it also refuses key/main focus and no longer hides on deactivate (a panel hides itself when its app deactivates, and a non-activating panel's app is permanently deactivated). Both halves are needed — either one alone still steals focus.
+
 ## [1.25.4] — 2026-09-23
 
 ### Fixed
