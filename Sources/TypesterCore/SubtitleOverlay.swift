@@ -339,6 +339,10 @@ struct SubtitleView: View {
     static let insets = PillInsets(top: 24, left: 30, bottom: 30, right: 30)
     /// Deliberately slim: the resting pill is a hairline, not a lozenge.
     static let restingCapsule = CGSize(width: 42, height: 14)
+    /// Footprint of the two hover actions. The capsule pulls in to this while
+    /// they are showing, so the bar stays balanced around them instead of
+    /// leaving dead space either side.
+    static let actionsCapsule = CGSize(width: 122, height: 36)
     static let expandedCornerRadius: CGFloat = 20
     /// The resting pill is faint; hovering lifts it so it stays discoverable.
     static let restingOpacity: Double = 0.34
@@ -363,6 +367,7 @@ struct SubtitleView: View {
             .frame(width: restingWindowSize?.width, height: restingWindowSize?.height)
             .background { capsuleShell }
             .overlay { capsuleHitArea }
+            .overlay { capsuleActions }
             .opacity(shellOpacity)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
@@ -412,6 +417,16 @@ struct SubtitleView: View {
         )
     }
 
+    /// What the capsule actually draws. While the hover actions are up it pulls
+    /// in to their footprint; the hit area deliberately does **not** follow, or
+    /// the pointer would fall outside the shrinking capsule and the hover would
+    /// flicker on and off.
+    private func drawnCapsule(target: CGSize) -> CGSize {
+        showsActions ? Self.actionsCapsule : animatingCapsule(target: target)
+    }
+
+    private var showsActions: Bool { isExpanded && viewModel.isHovering }
+
     private func cornerRadius(_ size: CGSize) -> CGFloat {
         min(size.height / 2, Self.expandedCornerRadius)
     }
@@ -419,7 +434,7 @@ struct SubtitleView: View {
     /// Crops the caption to the animating capsule, pinned to the bottom-centre.
     private var animatedCapsuleMask: some View {
         GeometryReader { proxy in
-            let size = animatingCapsule(target: proxy.size)
+            let size = drawnCapsule(target: proxy.size)
             RoundedRectangle(cornerRadius: cornerRadius(size), style: .continuous)
                 .frame(width: size.width, height: size.height)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
@@ -430,7 +445,7 @@ struct SubtitleView: View {
     /// capsule so the shadow deepens as the bar grows.
     private var capsuleShell: some View {
         GeometryReader { proxy in
-            let size = animatingCapsule(target: targetCapsule(inWindowOf: proxy.size))
+            let size = drawnCapsule(target: targetCapsule(inWindowOf: proxy.size))
             SoftShadowPillBackground(
                 cornerRadius: cornerRadius(size),
                 margin: Self.insets.nsEdgeInsets,
@@ -444,6 +459,9 @@ struct SubtitleView: View {
                 height: size.height + Self.insets.top + Self.insets.bottom
             )
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+            // The AppKit capsule must never take mouse events: it sits over the
+            // whole bar and would swallow clicks meant for the actions.
+            .allowsHitTesting(false)
         }
     }
 
@@ -470,6 +488,26 @@ struct SubtitleView: View {
                 .help(isExpanded ? "Dictating — hover for Stop or Cancel" : "Click to start dictation")
                 .padding(Self.insets.edgeInsets)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+        }
+    }
+
+    /// Stop / Cancel, revealed while the pointer is over the caption. Rendered
+    /// *above* the hit area: attached underneath it, the hit area's own tap
+    /// gesture swallowed every click before it could reach these buttons.
+    private var capsuleActions: some View {
+        GeometryReader { proxy in
+            let size = drawnCapsule(target: targetCapsule(inWindowOf: proxy.size))
+            HStack(spacing: 8) {
+                actionButton("Stop dictation", systemImage: "stop.fill", isPrimary: true) { onStop?() }
+                actionButton("Cancel dictation", systemImage: "xmark", isPrimary: false) { onCancel?() }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .frame(width: size.width, height: size.height)
+            .opacity(showsActions ? 1 : 0)
+            .allowsHitTesting(showsActions)
+            .padding(Self.insets.edgeInsets)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
     }
 
@@ -502,43 +540,29 @@ struct SubtitleView: View {
     }
 
     private var pillContent: some View {
-        // Keep the normal content as the sole layout anchor. The actions are an
-        // overlay so their labels can never change the caption's measured size.
+        // The hover actions are a capsule-level overlay (above the hit area), so
+        // only the caption body swaps out here.
         regularContent
             .frame(minHeight: 20)
             .opacity(viewModel.isHovering ? 0 : 1)
             .scaleEffect(viewModel.isHovering ? 0.985 : 1)
             .allowsHitTesting(!viewModel.isHovering)
-            .overlay(actionButtons)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
     }
 
-    /// Revealed while the pointer is over the caption: finish (paste) or discard.
-    private var actionButtons: some View {
-        HStack(spacing: 8) {
-            actionButton("Stop", systemImage: "stop.fill", isPrimary: true) { onStop?() }
-            actionButton("Cancel", systemImage: "xmark", isPrimary: false) { onCancel?() }
-        }
-        .opacity(viewModel.isHovering ? 1 : 0)
-        .scaleEffect(viewModel.isHovering ? 1 : 0.985)
-        .allowsHitTesting(viewModel.isHovering)
-        .accessibilityHidden(!viewModel.isHovering)
-    }
-
+    /// Icon-only: two glyphs read at a glance and let the capsule stay compact.
     private func actionButton(
-        _ title: String,
+        _ label: String,
         systemImage: String,
         isPrimary: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
+            Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.92))
-                .tracking(0.2)
-                .padding(.horizontal, 14)
+                .foregroundColor(.white.opacity(0.95))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.white.opacity(isPrimary ? 0.20 : 0.10), in: Capsule())
                 .overlay(
@@ -550,8 +574,8 @@ struct SubtitleView: View {
         }
         .focuslessButton()
         .contentShape(Capsule())
-        .accessibilityLabel(isPrimary ? "Stop dictation" : "Cancel dictation")
-        .help(isPrimary ? "Stop and paste the transcript" : "Discard this dictation")
+        .accessibilityLabel(label)
+        .help(label)
     }
 
     private var regularContent: some View {

@@ -2,6 +2,15 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.3] — 2026-09-23
+
+### Fixed
+- **The caption's hover buttons did nothing when clicked.** The gesture layer that gives the capsule its hit area sat on top of them and swallowed every click before it could reach them. The actions now render above it, and the AppKit-drawn capsule no longer accepts mouse events at all.
+- **The buttons showed “…” instead of their labels.** They were sized to the caption content rather than to the capsule, so both labels truncated. The actions are now icon-only — a stop square and an × — which reads at a glance and needs no room.
+
+### Changed
+- While the hover actions are showing, the capsule pulls in to their footprint (122×36) rather than staying as wide as the transcript, so the bar stays balanced around them instead of leaving dead space either side.
+
 ## [1.25.2] — 2026-09-23
 
 ### Fixed
