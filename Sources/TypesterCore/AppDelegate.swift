@@ -214,7 +214,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Environment-driven hooks used for automated visual checks:
     /// TYPESTER_APPEARANCE=dark|light, TYPESTER_FAKE_TRANSCRIPT=…,
-    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting|collapsed,
+    /// TYPESTER_DEMO=settings|onboarding|teach|pill, TYPESTER_PILL_MODE=live|processing|reconnecting|collapsed|hover,
     /// TYPESTER_PANE=<settings pane>, TYPESTER_SNAPSHOT=/path.png,
     /// TYPESTER_QA_PASTE=… (exercise the real paste/learning path after launch),
     /// TYPESTER_FORCE_STABLE_SIGNING_MIGRATION_NOTICE=1 (render the migration alert),
@@ -270,7 +270,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.demoPill(mode: mode) }
             if let snapshotPath {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                    self.subtitleOverlay.snapshotForDebug(to: snapshotPath)
+                    self.subtitleOverlay.snapshotContentForDebug(to: snapshotPath)
                     NSApp.terminate(self)
                 }
             }
@@ -316,12 +316,53 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Renders a SwiftUI view offscreen (no layer, so `cacheDisplay` draws it).
+    static func snapshot<V: View>(view: V, size: CGSize, to path: String) {
+        let host = NSHostingView(rootView: view)
+        host.frame = CGRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+        let bounds = host.bounds
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(bounds.width) * 2,
+            pixelsHigh: Int(bounds.height) * 2,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return }
+        rep.size = bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        host.cacheDisplay(in: bounds, to: rep)
+        NSGraphicsContext.restoreGraphicsState()
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+            Debug.log("View snapshot written to \(path)")
+        }
+    }
+
     private func demoPill(mode: String) {
         if mode == "collapsed" {
             subtitleOverlay.demoCollapsedPill()
             return
         }
         let notesIcon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
+        if mode == "hover" {
+            // Reproduce the real flow: resting pill grows into the caption with
+            // the hover actions showing.
+            subtitleOverlay.demoCollapsedPill()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                self.subtitleOverlay.show(appName: "Notes", appIcon: notesIcon)
+                self.subtitleOverlay.updateFinal("ship the release candidate tomorrow")
+                self.subtitleOverlay.viewModel.isHovering = true
+            }
+            return
+        }
         subtitleOverlay.show(appName: "Notes", appIcon: notesIcon)
         switch mode {
         case "processing":

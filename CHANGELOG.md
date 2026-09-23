@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.2] — 2026-09-23
+
+### Fixed
+- **The caption was dead to the mouse and its buttons were crushed together.** Two separate faults. `NSHostingView` silently imposes its content's *minimum* size on the window, so every explicit frame smaller than the caption was overridden and the window never matched the capsule drawn inside it; and the view's own capsule size was never measured, because the preference it relied on did not propagate out of a `GeometryReader` background — so the capsule stayed pill-sized while the window was caption-sized. The hosting view now contributes only its intrinsic size, and the capsule is derived from the layout directly.
+- **Hovering the caption blanked the transcript.** The gesture layer painted a filled shape over the caption to bound its hit area. It now draws nothing and only sets the hit region.
+- **The resting pill sat 12 points too low.** An oversized layout inside a smaller window is centred rather than aligned to the bottom, so the pill ended up resting on the Dock instead of 12 points above it. The layout is now pinned to the pill's own footprint while resting.
+
+### Changed
+- The resting pill is slimmer — 42×14 rather than 44×24 — with a tighter shadow, and still lifts on hover.
+
 ## [1.25.1] — 2026-09-23
 
 ### Fixed
