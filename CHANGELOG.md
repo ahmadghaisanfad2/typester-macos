@@ -2,6 +2,11 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.9] — 2026-09-24
+
+### Changed
+- **The Keychain prompt now comes to you.** When stored keys cannot be read, Typester asks as soon as it launches instead of waiting for you to find a button in Settings — going to Settings first was poor UX for something macOS wants to ask about anyway. The Settings action stays as a deliberate retry, and starting dictation with an unreadable key prompts too rather than opening Settings. The automatic prompt is offered once, so it cannot nag on every launch.
+
 ## [1.25.8] — 2026-09-24
 
 ### Fixed

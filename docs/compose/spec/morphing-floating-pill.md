@@ -40,6 +40,8 @@ Also fixed: an oversized layout inside a smaller window is *centred*, not aligne
 
 **Amended 1.25.8** — 1.25.7 reconciled the keys at launch, and that read *blocked*: an item whose ACL does not authorise the build raises a dialog, so the app sat behind a prompt before finishing startup (observed: `SecurityAgent` up, `isActive` never reached, no bookkeeping written). Launch-time reads now run with `SecKeychainSetUserInteractionAllowed(false)`, which returns `errSecInteractionNotAllowed` (-25293) straight away; measured in isolation, an absent item still returns `errSecItemNotFound` (-25300), so "cannot read" and "not there" stay distinguishable without any dialog. A blocked read also had no exit: the configured list stayed empty, so dictation refused to start for want of a key and nothing would ever prompt again. Settings now reports the state and offers **Allow access to stored keys**, which re-reads with the prompt allowed and rewrites the payload so the item's ACL is created by this build.
 
+**Amended 1.25.9** — The recovery path was the wrong way round: the user had to open Settings to find a button before macOS would ask. Now `shouldAutoPromptForKeychainAccess` fires the prompt shortly after launch (once, so it cannot nag), and starting dictation while blocked prompts too instead of opening Settings. The Settings button stays as a deliberate retry.
+
 ## [S1] Problem
 
 1. **Two HUDs, one intent.** `FloatingDictationPill` and `SubtitleOverlay` were separate windows positioned independently (`visibleFrame.maxX - w - 28` / `visibleFrame.minY + 96` bottom-right vs `screen.frame.minY + 48` bottom-center). Starting dictation showed both, and the user had to look at two places.

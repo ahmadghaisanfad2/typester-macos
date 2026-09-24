@@ -115,6 +115,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Folds any pre-1.25.6 per-provider Keychain items into the single
         // payload before anything asks whether a key is configured.
         SettingsStore.shared.migrateAPIKeyStorageIfNeeded()
+        // Keys are stored but macOS would not hand them over: ask now, with the
+        // dialog macOS wanted to show, instead of sending the user to Settings
+        // to find a button.
+        if SettingsStore.shared.shouldAutoPromptForKeychainAccess {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                SettingsStore.shared.promptForKeychainAccessIfBlocked()
+            }
+        }
 
         if let latest = historyStore.entries.first(where: { $0.hasText }) {
             lastTranscript = latest.text
@@ -1898,6 +1906,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Paste and press-to-speak both need Accessibility. After an ad-hoc
         // update macOS drops the grant and the hotkey appears dead.
         guard ensureAccessibilityForDictation() else { return }
+
+        // A stored key macOS would not hand over: ask for it directly, rather
+        // than sending the user to Settings to find a button.
+        if !hasAPIKeyForCurrentProvider() {
+            SettingsStore.shared.promptForKeychainAccessIfBlocked()
+        }
 
         guard hasAPIKeyForCurrentProvider() else {
             Debug.log("startRecording() SKIPPED - no API key for \(SettingsStore.shared.sttProvider)")
