@@ -42,6 +42,8 @@ Also fixed: an oversized layout inside a smaller window is *centred*, not aligne
 
 **Amended 1.25.9** — The recovery path was the wrong way round: the user had to open Settings to find a button before macOS would ask. Now `shouldAutoPromptForKeychainAccess` fires the prompt shortly after launch (once, so it cannot nag), and starting dictation while blocked prompts too instead of opening Settings. The Settings button stays as a deliberate retry.
 
+**Amended 1.25.10** — With the stored secret no longer displayed, the eye button toggled an empty field and looked broken. It now reads the saved key on demand and reveals it, the caption underneath distinguishes "stored" from "new", and `isEditing` is judged against the revealed value (`revealedKeys`) so revealing a key does not offer a Save button for an unchanged value.
+
 ## [S1] Problem
 
 1. **Two HUDs, one intent.** `FloatingDictationPill` and `SubtitleOverlay` were separate windows positioned independently (`visibleFrame.maxX - w - 28` / `visibleFrame.minY + 96` bottom-right vs `screen.frame.minY + 48` bottom-center). Starting dictation showed both, and the user had to look at two places.
