@@ -2,6 +2,12 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.7] — 2026-09-24
+
+### Fixed
+- **Stored API keys showed as empty after 1.25.6** — the keys were never lost, they were just unreachable. Two faults. `SecItemCopyMatching`'s status was thrown away and every failure became `nil`, so a read macOS *refused* looked exactly like “no key here”; the migration then recorded itself as done and never looked again. And the payload could exist while the list of configured providers stayed empty, leaving the UI with nothing to show even though the values were right there. Reads now keep their outcome — `value` / `missing` / `unavailable` — a refused read leaves the migration incomplete so it is retried, only accounts actually read are deleted, the configured list is reconciled from the payload whenever it loads, and the payload is rewritten once so its ACL belongs to this build. That rewrite is what makes the prompts stop for good.
+- **A test run emptied the real keychain.** The migration used to run from `load()`, which tests also call, so a `swift test` folded the stored keys into the new item and deleted the originals — writing the bookkeeping into the test bundle's defaults where the app never saw it. The migration is now skipped under XCTest. A new `LegacyKeyMigration` is pure and unit-tested, including the refused-read case that caused this.
+
 ## [1.25.6] — 2026-09-24
 
 ### Fixed

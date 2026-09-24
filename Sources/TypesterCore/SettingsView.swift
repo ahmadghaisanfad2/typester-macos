@@ -477,6 +477,18 @@ struct SettingsView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if settings.keychainAccessBlocked {
+                    Label(
+                        "A key is stored but macOS would not let Typester read it. Quit and reopen Typester, then choose “Always Allow” when it asks.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
