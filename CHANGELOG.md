@@ -2,6 +2,11 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.12] — 2026-09-24
+
+### Fixed
+- **“OpenRouter” wrapped onto a second line in the provider picker.** The segmented control gives every option an equal share of the width, so with five providers a 12pt label plus 12pt of padding either side no longer fitted. Segments now use 8pt of padding and stay on one line, tightening slightly instead of wrapping.
+
 ## [1.25.11] — 2026-09-24
 
 ### Fixed
