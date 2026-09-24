@@ -270,6 +270,8 @@ public class SettingsStore: ObservableObject {
     private let keyStorageMigratedKey = "keyStorageMigratedV2"
     /// Set while stored keys exist but macOS has not authorised reading them.
     private let keychainAccessBlockedKey = "keychainAccessBlocked"
+    /// Set once the automatic access prompt has been offered.
+    private let keychainPromptedKey = "keychainAccessPrompted"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
     private let openaiKeychainAccount = "openai-api-key"
@@ -783,6 +785,29 @@ public class SettingsStore: ObservableObject {
         // is what stops the prompts for good from here on.
         guard !loaded.payload.keys.isEmpty else { return }
         writePayload(loaded.payload)
+    }
+
+    /// Shows the macOS Keychain prompt when stored keys could not be read.
+    ///
+    /// Called at launch and whenever dictation needs a key, so the user is asked
+    /// directly. Sending them to Settings to find a button is worse than showing
+    /// the dialog macOS wanted to show anyway. Returns true when the keys became
+    /// readable.
+    @discardableResult
+    public func promptForKeychainAccessIfBlocked() -> Bool {
+        guard keychainAccessBlocked else { return false }
+        requestKeychainAccess()
+        return !keychainAccessBlocked
+    }
+
+    /// True the first time a blocked read is seen, so the automatic prompt is
+    /// offered once rather than on every launch. The Settings action and the
+    /// dictation path remain as deliberate retries.
+    public var shouldAutoPromptForKeychainAccess: Bool {
+        guard keychainAccessBlocked else { return false }
+        guard !UserDefaults.standard.bool(forKey: keychainPromptedKey) else { return false }
+        UserDefaults.standard.set(true, forKey: keychainPromptedKey)
+        return true
     }
 
     /// Runs once per install. A fresh install finds no legacy item, so it reads

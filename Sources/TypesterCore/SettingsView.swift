@@ -51,6 +51,10 @@ struct SettingsView: View {
     @State private var showOpenRouterKey = false
     @State private var xaiKeyInput: String = ""
     @State private var showXaiKey = false
+    /// The stored key once the user asks to see it, per provider: the field
+    /// itself starts empty, so "has text" only means "there is something to
+    /// save" once it differs from this.
+    @State private var revealedKeys: [STTProviderType: String] = [:]
     @ObservedObject private var openRouterModels = OpenRouterModelsStore.shared
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
@@ -440,35 +444,16 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var apiKeySection: some View {
-        let (input, showKey, hasSavedKey, onSave, onRemove, link): (Binding<String>, Binding<Bool>, Bool, (String) -> Void, () -> Void, URL) = {
-            let provider = settings.sttProvider
-            let saved = settings.hasAPIKey(for: provider)
-            switch provider {
-            case .soniox:
-                return ($sonioxKeyInput, $showSonioxKey, saved, { settings.apiKey = $0 }, { settings.apiKey = nil }, URL(string: "https://soniox.com")!)
-            case .deepgram:
-                return ($deepgramKeyInput, $showDeepgramKey, saved, { settings.deepgramApiKey = $0 }, { settings.deepgramApiKey = nil }, URL(string: "https://console.deepgram.com")!)
-            case .openai:
-                return ($openaiKeyInput, $showOpenAIKey, saved, { settings.openaiApiKey = $0 }, { settings.openaiApiKey = nil }, URL(string: "https://platform.openai.com/api-keys")!)
-            case .openrouter:
-                return ($openrouterKeyInput, $showOpenRouterKey, saved, { settings.openrouterApiKey = $0 }, { settings.openrouterApiKey = nil }, URL(string: "https://openrouter.ai/keys")!)
-            case .xai:
-                return ($xaiKeyInput, $showXaiKey, saved, { settings.xaiApiKey = $0 }, { settings.xaiApiKey = nil }, URL(string: "https://console.x.ai/team/default/api-keys")!)
-            }
-        }()
+        let config = apiKeyConfig
+        let revealed = revealedKeys[config.provider] ?? ""
+        let isEditing = !config.input.wrappedValue.isEmpty && config.input.wrappedValue != revealed
 
         SettingsSection(
-            "\(settings.sttProvider.displayName) API key",
-            headerLink: ("Get key", link)
+            "\(config.provider.displayName) API key",
+            headerLink: ("Get key", config.link)
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                apiKeyField(
-                    key: input,
-                    showKey: showKey,
-                    hasSavedKey: hasSavedKey,
-                    onSave: onSave,
-                    onRemove: onRemove
-                )
+                apiKeyField(config: config, isEditing: isEditing, revealed: revealed)
 
                 Text("Stored in your macOS Keychain — never leaves this Mac except to call the provider. If macOS asks for your login password, choose “Always Allow” and it will not ask again.")
                     .font(.system(size: 11))
@@ -1166,15 +1151,70 @@ struct SettingsView: View {
         accessibilityGranted = TextPaster.checkAccessibilityPermission()
     }
 
+    /// Everything the key field needs for the selected provider.
+    private struct APIKeyFieldConfig {
+        var provider: STTProviderType
+        var input: Binding<String>
+        var showKey: Binding<Bool>
+        var hasSavedKey: Bool
+        /// Reads the stored secret, only ever called when the user asks to see it.
+        var loadStored: () -> String?
+        var save: (String) -> Void
+        var remove: () -> Void
+        var link: URL
+    }
+
+    private var apiKeyConfig: APIKeyFieldConfig {
+        let provider = settings.sttProvider
+        let saved = settings.hasAPIKey(for: provider)
+        switch provider {
+        case .soniox:
+            return APIKeyFieldConfig(
+                provider: provider, input: $sonioxKeyInput, showKey: $showSonioxKey, hasSavedKey: saved,
+                loadStored: { settings.apiKey },
+                save: { settings.apiKey = $0 }, remove: { settings.apiKey = nil },
+                link: URL(string: "https://soniox.com")!
+            )
+        case .deepgram:
+            return APIKeyFieldConfig(
+                provider: provider, input: $deepgramKeyInput, showKey: $showDeepgramKey, hasSavedKey: saved,
+                loadStored: { settings.deepgramApiKey },
+                save: { settings.deepgramApiKey = $0 }, remove: { settings.deepgramApiKey = nil },
+                link: URL(string: "https://console.deepgram.com")!
+            )
+        case .openai:
+            return APIKeyFieldConfig(
+                provider: provider, input: $openaiKeyInput, showKey: $showOpenAIKey, hasSavedKey: saved,
+                loadStored: { settings.openaiApiKey },
+                save: { settings.openaiApiKey = $0 }, remove: { settings.openaiApiKey = nil },
+                link: URL(string: "https://platform.openai.com/api-keys")!
+            )
+        case .openrouter:
+            return APIKeyFieldConfig(
+                provider: provider, input: $openrouterKeyInput, showKey: $showOpenRouterKey, hasSavedKey: saved,
+                loadStored: { settings.openrouterApiKey },
+                save: { settings.openrouterApiKey = $0 }, remove: { settings.openrouterApiKey = nil },
+                link: URL(string: "https://openrouter.ai/keys")!
+            )
+        case .xai:
+            return APIKeyFieldConfig(
+                provider: provider, input: $xaiKeyInput, showKey: $showXaiKey, hasSavedKey: saved,
+                loadStored: { settings.xaiApiKey },
+                save: { settings.xaiApiKey = $0 }, remove: { settings.xaiApiKey = nil },
+                link: URL(string: "https://console.x.ai/team/default/api-keys")!
+            )
+        }
+    }
+
     @ViewBuilder
     private func apiKeyField(
-        key: Binding<String>,
-        showKey: Binding<Bool>,
-        hasSavedKey: Bool,
-        onSave: @escaping (String) -> Void,
-        onRemove: @escaping () -> Void
+        config: APIKeyFieldConfig,
+        isEditing: Bool,
+        revealed: String
     ) -> some View {
-        let isEditing = !key.wrappedValue.isEmpty
+        let key = config.input
+        let showKey = config.showKey
+
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 ZStack {
@@ -1189,6 +1229,14 @@ struct SettingsView: View {
                 .fieldCard()
 
                 Button {
+                    if !showKey.wrappedValue, key.wrappedValue.isEmpty, config.hasSavedKey {
+                        // Reveal the stored key on demand. The field starts empty
+                        // by design, so without this the eye looked broken: it
+                        // toggled a field with nothing in it.
+                        let stored = config.loadStored() ?? ""
+                        key.wrappedValue = stored
+                        revealedKeys[config.provider] = stored
+                    }
                     showKey.wrappedValue.toggle()
                 } label: {
                     Image(systemName: showKey.wrappedValue ? "eye.slash" : "eye")
@@ -1198,11 +1246,11 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                 }
                 .focuslessButton()
-                .help(showKey.wrappedValue ? "Hide key" : "Show key")
+                .help(showKey.wrappedValue ? "Hide key" : "Show saved key")
 
                 // A stored key is never read back for display, so the tick is
                 // what says "there is one" — no secret leaves the Keychain.
-                if hasSavedKey && !isEditing {
+                if config.hasSavedKey && !isEditing {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(Codex.green)
@@ -1217,34 +1265,42 @@ struct SettingsView: View {
                     Spacer()
 
                     Button("Cancel") {
-                        key.wrappedValue = ""
+                        clearKeyInput(config)
                     }
                     .controlSize(.small)
 
                     Button("Save") {
-                        onSave(key.wrappedValue)
-                        key.wrappedValue = ""
+                        config.save(key.wrappedValue)
+                        clearKeyInput(config)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
                 .padding(.horizontal, 14)
-            } else if hasSavedKey {
+            } else if config.hasSavedKey {
                 HStack(spacing: 8) {
-                    Text("Saved in your Keychain. Paste a new key to replace it.")
+                    Text(revealed.isEmpty
+                         ? "Saved in your Keychain. Paste a new key to replace it."
+                         : "This is your saved key. Paste a new one to replace it.")
                         .font(.system(size: 11))
                         .foregroundStyle(Codex.textTertiary)
 
                     Spacer()
 
                     Button("Remove") {
-                        onRemove()
+                        config.remove()
+                        clearKeyInput(config)
                     }
                     .controlSize(.small)
                 }
                 .padding(.horizontal, 14)
             }
         }
+    }
+
+    private func clearKeyInput(_ config: APIKeyFieldConfig) {
+        config.input.wrappedValue = ""
+        revealedKeys[config.provider] = nil
     }
 
     private var shortcutDescription: String {

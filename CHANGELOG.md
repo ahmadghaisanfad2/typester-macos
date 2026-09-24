@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.10] — 2026-09-24
+
+### Fixed
+- **The eye button did nothing.** The key field starts empty by design — a stored secret is no longer displayed — so the eye was toggling a field with nothing in it and looked broken. Clicking it now reveals the saved key, read on demand at that moment, and the line underneath says whether you are looking at the stored key or entering a new one. Cancel, Save and Remove clear it again, and editing is judged against the revealed value so revealing a key no longer offers to save something you never changed.
+
+## [1.25.9] — 2026-09-24
+
+### Changed
+- **The Keychain prompt now comes to you.** When stored keys cannot be read, Typester asks as soon as it launches instead of waiting for you to find a button in Settings — going to Settings first was poor UX for something macOS wants to ask about anyway. The Settings action stays as a deliberate retry, and starting dictation with an unreadable key prompts too rather than opening Settings. The automatic prompt is offered once, so it cannot nag on every launch.
+
 ## [1.25.8] — 2026-09-24
 
 ### Fixed
