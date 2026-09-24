@@ -112,6 +112,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupPasteSuppression()
         setupAccessibilityTrustMonitoring()
         setupFloatingPill()
+        // Folds any pre-1.25.6 per-provider Keychain items into the single
+        // payload before anything asks whether a key is configured.
+        SettingsStore.shared.migrateAPIKeyStorageIfNeeded()
 
         if let latest = historyStore.entries.first(where: { $0.hasText }) {
             lastTranscript = latest.text
@@ -387,18 +390,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func hasAPIKeyForCurrentProvider() -> Bool {
-        switch SettingsStore.shared.sttProvider {
-        case .soniox:
-            return SettingsStore.shared.apiKey != nil
-        case .deepgram:
-            return SettingsStore.shared.deepgramApiKey != nil
-        case .openai:
-            return SettingsStore.shared.openaiApiKey != nil
-        case .openrouter:
-            return SettingsStore.shared.openrouterApiKey != nil
-        case .xai:
-            return SettingsStore.shared.xaiApiKey != nil
-        }
+        SettingsStore.shared.hasAPIKey(for: SettingsStore.shared.sttProvider)
     }
 
     private func scheduleStableSigningMigrationNoticeIfNeeded(hasConfiguredAPIKey: Bool) {

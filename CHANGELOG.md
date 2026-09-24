@@ -2,6 +2,15 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.6] — 2026-09-24
+
+### Fixed
+- **macOS kept asking for your login password.** Every API key was a computed property that read the Keychain on each access, and there was one item *per provider* — so opening Settings fired five reads on appear plus more on every render, and each one could raise the prompt. Keys now live in a single Keychain item, are read at most once per launch, and are cached. Opening Settings and onboarding no longer read a secret at all: whether a key is configured is answered from a stored flag, so neither screen touches the Keychain.
+- The key fields no longer display the stored secret. They start empty with a “saved” tick, and **Remove** clears it — which is also why they no longer have to fetch it.
+
+### Changed
+- Existing per-provider items are folded into the single payload once, on the first launch after this update. That is the last time macOS may ask, and there is a hint in Settings and onboarding to choose **Always Allow** so it never asks again.
+
 ## [1.25.5] — 2026-09-23
 
 ### Fixed

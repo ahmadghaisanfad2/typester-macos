@@ -80,21 +80,9 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            if let key = settings.apiKey {
-                sonioxKeyInput = key
-            }
-            if let key = settings.deepgramApiKey {
-                deepgramKeyInput = key
-            }
-            if let key = settings.openaiApiKey {
-                openaiKeyInput = key
-            }
-            if let key = settings.openrouterApiKey {
-                openrouterKeyInput = key
-            }
-            if let key = settings.xaiApiKey {
-                xaiKeyInput = key
-            }
+            // The key fields deliberately start empty: showing a stored secret
+            // would read it out of the Keychain on every visit, and that read is
+            // what raises the login-password prompt.
             if let pane = ProcessInfo.processInfo.environment["TYPESTER_PANE"],
                let parsed = SettingsPane(rawValue: pane) {
                 selectedSection = parsed
@@ -452,18 +440,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var apiKeySection: some View {
-        let (input, showKey, savedKey, onSave, link): (Binding<String>, Binding<Bool>, String?, (String?) -> Void, URL) = {
-            switch settings.sttProvider {
+        let (input, showKey, hasSavedKey, onSave, onRemove, link): (Binding<String>, Binding<Bool>, Bool, (String) -> Void, () -> Void, URL) = {
+            let provider = settings.sttProvider
+            let saved = settings.hasAPIKey(for: provider)
+            switch provider {
             case .soniox:
-                return ($sonioxKeyInput, $showSonioxKey, settings.apiKey, { settings.apiKey = $0 }, URL(string: "https://soniox.com")!)
+                return ($sonioxKeyInput, $showSonioxKey, saved, { settings.apiKey = $0 }, { settings.apiKey = nil }, URL(string: "https://soniox.com")!)
             case .deepgram:
-                return ($deepgramKeyInput, $showDeepgramKey, settings.deepgramApiKey, { settings.deepgramApiKey = $0 }, URL(string: "https://console.deepgram.com")!)
+                return ($deepgramKeyInput, $showDeepgramKey, saved, { settings.deepgramApiKey = $0 }, { settings.deepgramApiKey = nil }, URL(string: "https://console.deepgram.com")!)
             case .openai:
-                return ($openaiKeyInput, $showOpenAIKey, settings.openaiApiKey, { settings.openaiApiKey = $0 }, URL(string: "https://platform.openai.com/api-keys")!)
+                return ($openaiKeyInput, $showOpenAIKey, saved, { settings.openaiApiKey = $0 }, { settings.openaiApiKey = nil }, URL(string: "https://platform.openai.com/api-keys")!)
             case .openrouter:
-                return ($openrouterKeyInput, $showOpenRouterKey, settings.openrouterApiKey, { settings.openrouterApiKey = $0 }, URL(string: "https://openrouter.ai/keys")!)
+                return ($openrouterKeyInput, $showOpenRouterKey, saved, { settings.openrouterApiKey = $0 }, { settings.openrouterApiKey = nil }, URL(string: "https://openrouter.ai/keys")!)
             case .xai:
-                return ($xaiKeyInput, $showXaiKey, settings.xaiApiKey, { settings.xaiApiKey = $0 }, URL(string: "https://console.x.ai/team/default/api-keys")!)
+                return ($xaiKeyInput, $showXaiKey, saved, { settings.xaiApiKey = $0 }, { settings.xaiApiKey = nil }, URL(string: "https://console.x.ai/team/default/api-keys")!)
             }
         }()
 
@@ -472,9 +462,15 @@ struct SettingsView: View {
             headerLink: ("Get key", link)
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                apiKeyField(key: input, showKey: showKey, savedKey: savedKey, onSave: onSave)
+                apiKeyField(
+                    key: input,
+                    showKey: showKey,
+                    hasSavedKey: hasSavedKey,
+                    onSave: onSave,
+                    onRemove: onRemove
+                )
 
-                Text("Stored in your macOS Keychain — never leaves this Mac except to call the provider.")
+                Text("Stored in your macOS Keychain — never leaves this Mac except to call the provider. If macOS asks for your login password, choose “Always Allow” and it will not ask again.")
                     .font(.system(size: 11))
                     .foregroundStyle(Codex.textTertiary)
                     .padding(.horizontal, 14)
@@ -1155,9 +1151,11 @@ struct SettingsView: View {
     private func apiKeyField(
         key: Binding<String>,
         showKey: Binding<Bool>,
-        savedKey: String?,
-        onSave: @escaping (String?) -> Void
+        hasSavedKey: Bool,
+        onSave: @escaping (String) -> Void,
+        onRemove: @escaping () -> Void
     ) -> some View {
+        let isEditing = !key.wrappedValue.isEmpty
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 ZStack {
@@ -1183,29 +1181,46 @@ struct SettingsView: View {
                 .focuslessButton()
                 .help(showKey.wrappedValue ? "Hide key" : "Show key")
 
-                if savedKey != nil && key.wrappedValue == savedKey {
+                // A stored key is never read back for display, so the tick is
+                // what says "there is one" — no secret leaves the Keychain.
+                if hasSavedKey && !isEditing {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(Codex.green)
-                        .help("Saved to Keychain")
+                        .help("Saved in your Keychain")
                 }
             }
             .padding(.horizontal, 14)
             .padding(.top, 14)
 
-            if key.wrappedValue != (savedKey ?? "") {
+            if isEditing {
                 HStack(spacing: 8) {
                     Spacer()
 
                     Button("Cancel") {
-                        key.wrappedValue = savedKey ?? ""
+                        key.wrappedValue = ""
                     }
                     .controlSize(.small)
 
                     Button("Save") {
-                        onSave(key.wrappedValue.isEmpty ? nil : key.wrappedValue)
+                        onSave(key.wrappedValue)
+                        key.wrappedValue = ""
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 14)
+            } else if hasSavedKey {
+                HStack(spacing: 8) {
+                    Text("Saved in your Keychain. Paste a new key to replace it.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Codex.textTertiary)
+
+                    Spacer()
+
+                    Button("Remove") {
+                        onRemove()
+                    }
                     .controlSize(.small)
                 }
                 .padding(.horizontal, 14)

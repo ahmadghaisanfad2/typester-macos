@@ -28,7 +28,7 @@ public final class OpenRouterClient: STTProvider {
     }
 
     public func connect() {
-        guard SettingsStore.shared.openrouterApiKey != nil else {
+        guard SettingsStore.shared.hasAPIKey(for: .openrouter) else {
             onError?(OpenRouterError.missingAPIKey.localizedDescription)
             return
         }

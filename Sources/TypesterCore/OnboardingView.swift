@@ -31,13 +31,7 @@ struct OnboardingView: View {
     }
 
     private var hasApiKey: Bool {
-        switch settings.sttProvider {
-        case .soniox: return settings.apiKey != nil
-        case .deepgram: return settings.deepgramApiKey != nil
-        case .openai: return settings.openaiApiKey != nil
-        case .openrouter: return settings.openrouterApiKey != nil
-        case .xai: return settings.xaiApiKey != nil
-        }
+        settings.hasAPIKey(for: settings.sttProvider)
     }
 
     private var apiKeyLink: (String, URL) {
@@ -127,7 +121,7 @@ struct OnboardingView: View {
         .frame(height: permissionsComplete ? 632 : 592)
         .onAppear {
             checkPermissions()
-            loadApiKeyForProvider()
+            clearApiKeyInputForProvider()
             currentStep = initialStep
             if initialStep == 1 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -137,7 +131,7 @@ struct OnboardingView: View {
             triggerPermissionsForCurrentStepIfNeeded()
         }
         .onChange(of: settings.sttProvider) { provider in
-            loadApiKeyForProvider()
+            clearApiKeyInputForProvider()
             if provider == .openrouter {
                 openRouterModels.ensureLoaded()
             }
@@ -422,6 +416,11 @@ struct OnboardingView: View {
                 .fieldCard()
                 .focused($isApiKeyFocused)
 
+            Text("Stored in your macOS Keychain. If macOS asks for your login password, choose “Always Allow” and it will not ask again.")
+                .font(.system(size: 11))
+                .foregroundStyle(Codex.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
             if settings.sttProvider == .openai {
                 Picker("Model", selection: $settings.openaiModel) {
                     ForEach(OpenAITranscribeModel.allCases) { model in
@@ -555,19 +554,10 @@ struct OnboardingView: View {
         Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    private func loadApiKeyForProvider() {
-        switch settings.sttProvider {
-        case .soniox:
-            apiKeyInput = settings.apiKey ?? ""
-        case .deepgram:
-            apiKeyInput = settings.deepgramApiKey ?? ""
-        case .openai:
-            apiKeyInput = settings.openaiApiKey ?? ""
-        case .openrouter:
-            apiKeyInput = settings.openrouterApiKey ?? ""
-        case .xai:
-            apiKeyInput = settings.xaiApiKey ?? ""
-        }
+    /// The field never shows a stored secret, so switching provider costs no
+    /// Keychain read — which is what used to raise a password prompt here.
+    private func clearApiKeyInputForProvider() {
+        apiKeyInput = ""
     }
 
     private func checkPermissions() {

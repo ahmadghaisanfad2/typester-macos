@@ -158,9 +158,7 @@ tccutil reset Accessibility com.typester.app
 defaults delete com.typester.app
 
 # Remove API keys from keychain
-security delete-generic-password -s "com.typester.api" -a "soniox-api-key"
-security delete-generic-password -s "com.typester.api" -a "deepgram-api-key"
-security delete-generic-password -s "com.typester.api" -a "openai-api-key"
+security delete-generic-password -s "com.typester.api" -a "api-keys"
 ```
 
 ## Architecture
