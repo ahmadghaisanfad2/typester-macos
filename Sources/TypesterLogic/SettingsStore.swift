@@ -259,11 +259,19 @@ public class SettingsStore: ObservableObject {
     private let showInDockKey = "showInDock"
     private let focusOnMyVoiceKey = "focusOnMyVoice"
     private let keychainService = "com.typester.api"
+    /// Every provider key lives in this one item now, as a JSON payload.
+    private let combinedKeychainAccount = "api-keys"
+    /// Accounts holding a key, so the UI can answer without reading a secret.
+    private let configuredAccountsKey = "configuredProviders"
+    /// Set once the per-provider items have been folded into the payload.
+    private let keyStorageMigratedKey = "keyStorageMigrated"
     private let sonioxKeychainAccount = "soniox-api-key"
     private let deepgramKeychainAccount = "deepgram-api-key"
     private let openaiKeychainAccount = "openai-api-key"
     private let openrouterKeychainAccount = "openrouter-api-key"
     private let xaiKeychainAccount = "xai-api-key"
+    /// Process-lifetime cache: the Keychain is read at most once per launch.
+    private var loadedPayload: APIKeyPayload?
 
     private init() {
         loadShortcutKeys()
@@ -570,69 +578,121 @@ public class SettingsStore: ObservableObject {
 
     // MARK: - API keys (Keychain)
 
+    /// Accounts holding a key, persisted so `hasAPIKey(for:)` never has to read
+    /// a secret — reading one is what raises the login-password prompt.
+    private var configuredAccounts: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: configuredAccountsKey) ?? [])
+    }
+
+    private func setConfiguredAccounts(_ accounts: Set<String>) {
+        UserDefaults.standard.set(Array(accounts).sorted(), forKey: configuredAccountsKey)
+    }
+
+    /// True when a key is stored for `provider`, answered without Keychain
+    /// access. The UI asks this on every render.
+    public func hasAPIKey(for provider: STTProviderType) -> Bool {
+        configuredAccounts.contains(keychainAccount(for: provider))
+    }
+
+    private func keychainAccount(for provider: STTProviderType) -> String {
+        switch provider {
+        case .soniox: return sonioxKeychainAccount
+        case .deepgram: return deepgramKeychainAccount
+        case .openai: return openaiKeychainAccount
+        case .openrouter: return openrouterKeychainAccount
+        case .xai: return xaiKeychainAccount
+        }
+    }
+
+    private var legacyKeychainAccounts: [String] {
+        STTProviderType.allCases.map(keychainAccount(for:))
+    }
+
+    /// The keys, read from the Keychain at most once per process and then held.
+    private var keyPayload: APIKeyPayload {
+        if let loadedPayload { return loadedPayload }
+        let payload = migrateLegacyKeys()
+        loadedPayload = payload
+        return payload
+    }
+
+    private func storeKey(_ value: String?, for account: String) {
+        var payload = keyPayload
+        payload.setKey(value, for: account)
+        writePayload(payload)
+        objectWillChange.send()
+    }
+
+    private func writePayload(_ payload: APIKeyPayload) {
+        loadedPayload = payload
+        setConfiguredAccounts(payload.accounts)
+        guard let json = payload.json else { return }
+        setKeychainItem(json, account: combinedKeychainAccount)
+    }
+
+    /// Folds the old one-item-per-provider storage into the single payload.
+    /// Presented to the user as at most one prompt per legacy item, once ever.
+    private func migrateLegacyKeys() -> APIKeyPayload {
+        if let json = getKeychainItem(account: combinedKeychainAccount),
+           let payload = APIKeyPayload(json: json) {
+            return payload
+        }
+
+        var payload = APIKeyPayload()
+        for legacy in legacyKeychainAccounts {
+            if let value = getKeychainItem(account: legacy), !value.isEmpty {
+                payload.setKey(value, for: legacy)
+            }
+        }
+        guard !payload.keys.isEmpty else { return payload }
+
+        writePayload(payload)
+        for legacy in legacyKeychainAccounts {
+            deleteKeychainItem(account: legacy)
+        }
+        return payload
+    }
+
+    /// Runs once per install. A fresh install finds no legacy item, so it reads
+    /// nothing that exists and raises no prompt at all.
+    ///
+    /// Called explicitly by the app at launch rather than from `load()`: tests
+    /// build the store too, and a test process reading the real Keychain would
+    /// raise the very prompt this is here to avoid.
+    public func migrateAPIKeyStorageIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: keyStorageMigratedKey) else { return }
+        _ = keyPayload
+        UserDefaults.standard.set(true, forKey: keyStorageMigratedKey)
+    }
+
     // Soniox API key
     public var apiKey: String? {
-        get { getKeychainItem(account: sonioxKeychainAccount) }
-        set {
-            if let value = newValue {
-                setKeychainItem(value, account: sonioxKeychainAccount)
-            } else {
-                deleteKeychainItem(account: sonioxKeychainAccount)
-            }
-            objectWillChange.send()
-        }
+        get { keyPayload.key(for: sonioxKeychainAccount) }
+        set { storeKey(newValue, for: sonioxKeychainAccount) }
     }
 
     // Deepgram API key
     public var deepgramApiKey: String? {
-        get { getKeychainItem(account: deepgramKeychainAccount) }
-        set {
-            if let value = newValue {
-                setKeychainItem(value, account: deepgramKeychainAccount)
-            } else {
-                deleteKeychainItem(account: deepgramKeychainAccount)
-            }
-            objectWillChange.send()
-        }
+        get { keyPayload.key(for: deepgramKeychainAccount) }
+        set { storeKey(newValue, for: deepgramKeychainAccount) }
     }
 
     // OpenAI API key
     public var openaiApiKey: String? {
-        get { getKeychainItem(account: openaiKeychainAccount) }
-        set {
-            if let value = newValue {
-                setKeychainItem(value, account: openaiKeychainAccount)
-            } else {
-                deleteKeychainItem(account: openaiKeychainAccount)
-            }
-            objectWillChange.send()
-        }
+        get { keyPayload.key(for: openaiKeychainAccount) }
+        set { storeKey(newValue, for: openaiKeychainAccount) }
     }
 
     // OpenRouter API key
     public var openrouterApiKey: String? {
-        get { getKeychainItem(account: openrouterKeychainAccount) }
-        set {
-            if let value = newValue {
-                setKeychainItem(value, account: openrouterKeychainAccount)
-            } else {
-                deleteKeychainItem(account: openrouterKeychainAccount)
-            }
-            objectWillChange.send()
-        }
+        get { keyPayload.key(for: openrouterKeychainAccount) }
+        set { storeKey(newValue, for: openrouterKeychainAccount) }
     }
 
     // xAI API key
     public var xaiApiKey: String? {
-        get { getKeychainItem(account: xaiKeychainAccount) }
-        set {
-            if let value = newValue {
-                setKeychainItem(value, account: xaiKeychainAccount)
-            } else {
-                deleteKeychainItem(account: xaiKeychainAccount)
-            }
-            objectWillChange.send()
-        }
+        get { keyPayload.key(for: xaiKeychainAccount) }
+        set { storeKey(newValue, for: xaiKeychainAccount) }
     }
 
     private func getKeychainItem(account: String) -> String? {

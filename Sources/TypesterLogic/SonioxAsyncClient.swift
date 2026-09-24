@@ -103,7 +103,7 @@ public final class SonioxAsyncClient: STTProvider {
     }
 
     public func connect() {
-        guard SettingsStore.shared.apiKey != nil else {
+        guard SettingsStore.shared.hasAPIKey(for: .soniox) else {
             onError?(SonioxAsyncError.missingAPIKey.localizedDescription)
             return
         }

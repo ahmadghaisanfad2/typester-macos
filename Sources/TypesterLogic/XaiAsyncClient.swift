@@ -46,7 +46,7 @@ public final class XaiAsyncClient: STTProvider {
     }
 
     public func connect() {
-        guard SettingsStore.shared.xaiApiKey != nil else {
+        guard SettingsStore.shared.hasAPIKey(for: .xai) else {
             onError?(XaiAsyncError.missingAPIKey.localizedDescription)
             return
         }
