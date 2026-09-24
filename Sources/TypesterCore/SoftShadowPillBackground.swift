@@ -5,6 +5,12 @@ import AppKit
 /// Bakes real Gaussian fades into the layer so borderless windows cannot clip them.
 final class SoftShadowPillNSView: NSView {
     var cornerRadius: CGFloat = 20
+    /// When true the capsule is a stadium: the radius follows the *current*
+    /// height at draw time. A radius passed in cannot be animated — it is read
+    /// once per layout, not interpolated — so a resize animation with a fixed
+    /// radius draws a big shape with the small shape's corners, which reads as
+    /// a rectangle. Deriving it from the bounds keeps the ends round throughout.
+    var isStadium: Bool = false
     /// Clear margin around the capsule where the shadow may fade.
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
     /// Multiplies both shadow blurs and offsets. Smaller pills need a tighter
@@ -24,6 +30,9 @@ final class SoftShadowPillNSView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.masksToBounds = false
         clipsToBounds = false
+        // Redraw while a layout animation resizes the view, so a stadium
+        // radius keeps following the height instead of being stretched.
+        layer?.needsDisplayOnBoundsChange = true
     }
 
     required init?(coder: NSCoder) {
@@ -42,10 +51,11 @@ final class SoftShadowPillNSView: NSView {
         )
         guard pill.width > 1, pill.height > 1 else { return }
 
+        let radius = isStadium ? pill.height / 2 : cornerRadius
         let path = CGPath(
             roundedRect: pill,
-            cornerWidth: cornerRadius,
-            cornerHeight: cornerRadius,
+            cornerWidth: radius,
+            cornerHeight: radius,
             transform: nil
         )
 
@@ -126,6 +136,9 @@ final class SoftShadowPillNSView: NSView {
 
 struct SoftShadowPillBackground: NSViewRepresentable {
     var cornerRadius: CGFloat = 20
+    /// Stadium ends: the radius follows the current height, so it survives a
+    /// resize animation.
+    var isStadium: Bool = false
     var margin: NSEdgeInsets = NSEdgeInsets(top: 36, left: 44, bottom: 44, right: 44)
     var shadowScale: CGFloat = 1
     var glowFill: Bool = false
@@ -133,6 +146,7 @@ struct SoftShadowPillBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> SoftShadowPillNSView {
         let view = SoftShadowPillNSView()
         view.cornerRadius = cornerRadius
+        view.isStadium = isStadium
         view.margin = margin
         view.shadowScale = shadowScale
         view.glowFill = glowFill
@@ -141,6 +155,7 @@ struct SoftShadowPillBackground: NSViewRepresentable {
 
     func updateNSView(_ nsView: SoftShadowPillNSView, context: Context) {
         nsView.cornerRadius = cornerRadius
+        nsView.isStadium = isStadium
         nsView.margin = margin
         nsView.shadowScale = shadowScale
         nsView.glowFill = glowFill

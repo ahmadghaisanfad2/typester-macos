@@ -201,11 +201,46 @@ public struct XaiConnectionConfig: STTConnectionConfig {
     }
 }
 
+/// Drops a final transcript that repeats the previous one with no interim text
+/// in between.
+///
+/// The xAI stream finalises a segment and then finalises the utterance with the
+/// same text, so appending both pasted every phrase twice. Interim text between
+/// two identical finals means the model heard something new — the user really
+/// did say the same words again — so that repeat is kept.
+public struct XaiRepeatedFinalFilter {
+    private var lastFinalText: String?
+    private var sawInterimSinceFinal = true
+
+    public init() {}
+
+    public mutating func reset() {
+        lastFinalText = nil
+        sawInterimSinceFinal = true
+    }
+
+    /// Call for every interim transcript, before the final that follows it.
+    public mutating func noteInterim() {
+        sawInterimSinceFinal = true
+    }
+
+    /// True when `text` is the protocol repeating itself and should be dropped.
+    public mutating func shouldDrop(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+
+        let isRepeat = !sawInterimSinceFinal && text == lastFinalText
+        lastFinalText = text
+        sawInterimSinceFinal = false
+        return isRepeat
+    }
+}
+
 /// xAI streaming speech-to-text client (raw PCM over WebSocket).
 public class XaiClient: STTClientBase {
     private var createdFallbackWorkItem: DispatchWorkItem?
     private var finalizeWatchdog: DispatchWorkItem?
     private var didEmitFinalText = false
+    private var repeatedFinalFilter = XaiRepeatedFinalFilter()
 
     public override init() { super.init() }
 
@@ -215,6 +250,7 @@ public class XaiClient: STTClientBase {
 
     public override func connect() {
         didEmitFinalText = false
+        repeatedFinalFilter.reset()
         cancelTimers()
         super.connect()
     }
@@ -270,12 +306,25 @@ public class XaiClient: STTClientBase {
         }
 
         guard containsFinalized else {
+            var routed: [STTParseResult] = []
             for result in results {
-                if case .transcript(let text, true, _) = result, !text.isEmpty {
+                switch result {
+                case .transcript(let text, false, _):
+                    repeatedFinalFilter.noteInterim()
+                case .transcript(let text, true, _) where !text.isEmpty:
+                    // The stream finalises a segment and then the utterance with
+                    // the same text; appending both pasted every phrase twice.
+                    if repeatedFinalFilter.shouldDrop(text) {
+                        Debug.log("xAI repeated a final with no interim between; dropped it")
+                        continue
+                    }
                     didEmitFinalText = true
+                default:
+                    break
                 }
+                routed.append(result)
             }
-            super.routeParseResults(results)
+            super.routeParseResults(routed)
             return
         }
 

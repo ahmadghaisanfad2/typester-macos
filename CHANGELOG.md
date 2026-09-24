@@ -2,6 +2,15 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.11] — 2026-09-24
+
+### Fixed
+- **The capsule went square as it shrank back to the pill.** The corner radius was derived from the target size — the pill's — while SwiftUI interpolated the frame, so mid-transition the shape was still large but its corners were already tiny, which reads as a rectangle. The shell now draws a *stadium*, taking the radius from its current height on every redraw, and the crop and hit shapes are `Capsule`s that follow their own size. Radius cannot be animated; geometry can.
+- **xAI real-time pasted every phrase twice.** The stream finalises a segment and then the utterance carrying the same text, and both were appended. A final repeating the previous one with **no interim text in between** is now dropped; a repeat that follows interim text is a phrase the user really did say again, and is kept.
+
+### Changed
+- A stored key now shows as a masked run of dots from the start, so the field looks like it holds something. The dots are a fixed placeholder — reading the real length would mean touching the Keychain just to draw the field.
+
 ## [1.25.10] — 2026-09-24
 
 ### Fixed
