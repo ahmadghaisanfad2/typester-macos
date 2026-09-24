@@ -239,7 +239,12 @@ struct CodexSegmented<Option: Hashable>: View {
                     Text(option.label)
                         .font(.system(size: 12, weight: isActive ? .medium : .regular))
                         .foregroundStyle(isActive ? Codex.text : Codex.textSecondary)
-                        .padding(.horizontal, 12)
+                        // Equal-width segments: with five providers the widest
+                        // label has to fit its share, so keep it on one line and
+                        // let it tighten rather than wrap onto a second row.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 8)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(
