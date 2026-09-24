@@ -44,6 +44,8 @@ Also fixed: an oversized layout inside a smaller window is *centred*, not aligne
 
 **Amended 1.25.10** — With the stored secret no longer displayed, the eye button toggled an empty field and looked broken. It now reads the saved key on demand and reveals it, the caption underneath distinguishes "stored" from "new", and `isEditing` is judged against the revealed value (`revealedKeys`) so revealing a key does not offer a Save button for an unchanged value.
 
+**Amended 1.25.11** — Shrinking back to the pill crossed a rectangle. The radius was derived from the *target* size (the pill's) while SwiftUI interpolated the frame, so the shape was still large with tiny corners. A radius passed to AppKit cannot be animated — it is read once per layout — so `SoftShadowPillBackground` now has `isStadium` and takes the radius from its current height at draw time (`layer?.needsDisplayOnBoundsChange = true` so it redraws through the resize), and the crop/hit shapes are `Capsule`s, which follow their own size. Same code also fixed the xAI real-time double paste (see `XaiRepeatedFinalFilter`) and gave the key field a masked dots placeholder so it no longer looks empty.
+
 ## [S1] Problem
 
 1. **Two HUDs, one intent.** `FloatingDictationPill` and `SubtitleOverlay` were separate windows positioned independently (`visibleFrame.maxX - w - 28` / `visibleFrame.minY + 96` bottom-right vs `screen.frame.minY + 48` bottom-center). Starting dictation showed both, and the user had to look at two places.

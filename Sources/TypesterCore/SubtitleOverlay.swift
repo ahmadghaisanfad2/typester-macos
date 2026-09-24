@@ -420,15 +420,13 @@ struct SubtitleView: View {
 
     private var showsActions: Bool { isExpanded && viewModel.isHovering }
 
-    private func cornerRadius(_ size: CGSize) -> CGFloat {
-        min(size.height / 2, Self.expandedCornerRadius)
-    }
-
     /// Crops the caption to the animating capsule, pinned to the bottom-centre.
+    /// `Capsule` rather than a fixed-radius rectangle: it derives its own ends
+    /// from the current size, so it stays round while the frame animates.
     private var animatedCapsuleMask: some View {
         GeometryReader { proxy in
             let size = drawnCapsule(target: proxy.size)
-            RoundedRectangle(cornerRadius: cornerRadius(size), style: .continuous)
+            Capsule(style: .continuous)
                 .frame(width: size.width, height: size.height)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
@@ -440,7 +438,7 @@ struct SubtitleView: View {
         GeometryReader { proxy in
             let size = drawnCapsule(target: targetCapsule(inWindowOf: proxy.size))
             SoftShadowPillBackground(
-                cornerRadius: cornerRadius(size),
+                isStadium: true,
                 margin: Self.insets.nsEdgeInsets,
                 shadowScale: 0.28 + 0.72 * morph,
                 // Flat dark plate while dictating so the in-capsule glow
@@ -468,11 +466,10 @@ struct SubtitleView: View {
     private var capsuleInteraction: some View {
         GeometryReader { proxy in
             let size = drawnCapsule(target: targetCapsule(inWindowOf: proxy.size))
-            let radius = cornerRadius(size)
             actionVisuals(in: size)
                 .opacity(showsActions ? 1 : 0)
                 .frame(width: size.width, height: size.height)
-                .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .contentShape(Capsule(style: .continuous))
                 .onHover { hovering in
                     withAnimation(.easeInOut(duration: 0.18)) { viewModel.isHovering = hovering }
                 }

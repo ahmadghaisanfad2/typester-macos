@@ -1,6 +1,59 @@
 import XCTest
 @testable import TypesterCore
 
+final class XaiRepeatedFinalFilterTests: XCTestCase {
+    func testDropsAFinalRepeatedWithNoInterimBetween() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop("Hello everybody"))
+        // The utterance final repeats the segment final verbatim.
+        XCTAssertTrue(filter.shouldDrop("Hello everybody"))
+        // And a third copy is still a repeat.
+        XCTAssertTrue(filter.shouldDrop("Hello everybody"))
+    }
+
+    func testKeepsARepeatTheUserActuallySaidAgain() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop("no"))
+        // Interim text means the model heard something new.
+        filter.noteInterim()
+        XCTAssertFalse(filter.shouldDrop("no"))
+    }
+
+    func testKeepsDifferentTextAndFirstFinal() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop("first"))
+        XCTAssertFalse(filter.shouldDrop("second"))
+        XCTAssertFalse(filter.shouldDrop("first"))
+    }
+
+    func testInterimAfterAFinalReArmsTheFilter() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop("ship it"))
+        XCTAssertTrue(filter.shouldDrop("ship it"))
+        filter.noteInterim()
+        XCTAssertFalse(filter.shouldDrop("ship it"))
+    }
+
+    func testResetClearsThePreviousSession() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop("hello"))
+        filter.reset()
+        XCTAssertFalse(filter.shouldDrop("hello"), "a new session must not inherit the old text")
+    }
+
+    func testEmptyTextIsNeverADuplicate() {
+        var filter = XaiRepeatedFinalFilter()
+
+        XCTAssertFalse(filter.shouldDrop(""))
+        XCTAssertFalse(filter.shouldDrop(""))
+    }
+}
+
 final class XaiAPITests: XCTestCase {
     func testMakeQueryItemsUsesStreamingDefaults() {
         let items = XaiAPI.makeQueryItems(language: nil, focusOnMyVoice: false, keyterms: [])

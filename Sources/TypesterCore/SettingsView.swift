@@ -1151,6 +1151,10 @@ struct SettingsView: View {
         accessibilityGranted = TextPaster.checkAccessibilityPermission()
     }
 
+    /// Placeholder dots shown when a key is stored. A fixed run on purpose: the
+    /// real length would mean reading the secret just to render the field.
+    private static let maskedKeyPlaceholder = String(repeating: "•", count: 28)
+
     /// Everything the key field needs for the selected provider.
     private struct APIKeyFieldConfig {
         var provider: STTProviderType
@@ -1221,9 +1225,15 @@ struct SettingsView: View {
                     if showKey.wrappedValue {
                         SingleLineTextField(text: key)
                     } else {
-                        SecureField("", text: key)
-                            .textFieldStyle(.plain)
-                            .font(.mono(12.5))
+                        // A stored key is shown as a masked placeholder, not read:
+                        // the field looks like it holds something without the
+                        // Keychain being touched. The eye reveals the real value.
+                        SecureField(
+                            config.hasSavedKey && key.wrappedValue.isEmpty ? Self.maskedKeyPlaceholder : "",
+                            text: key
+                        )
+                        .textFieldStyle(.plain)
+                        .font(.mono(12.5))
                     }
                 }
                 .fieldCard()
