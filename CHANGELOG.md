@@ -2,6 +2,12 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.8] — 2026-09-24
+
+### Fixed
+- **A refused Keychain read blocked the app at launch.** 1.25.7 reconciled the stored keys during startup, and reading an item whose ACL does not authorise the build raises a dialog — so the app sat behind a prompt before it had finished starting. Launch-time reads now run with Keychain interaction switched off, which returns `errSecInteractionNotAllowed` immediately instead of asking; an absent item still reports `errSecItemNotFound`, so the two stay distinguishable.
+- **There was no way out of a refused read.** With the configured-provider list empty, dictation refused to start for want of a key, so nothing would ever ask again and the keys were unreachable for good. Settings now says a key is stored but unreadable and offers **Allow access to stored keys**, which re-reads with the prompt allowed and then rewrites the item so its ACL belongs to this build — after which the prompts stop.
+
 ## [1.25.7] — 2026-09-24
 
 ### Fixed

@@ -586,16 +586,6 @@ public class SettingsStore: ObservableObject {
 
     // MARK: - API keys (Keychain)
 
-    /// Outcome of a Keychain read, preserving *why* it failed. Collapsing this
-    /// to `String?` is what made a denied read look like an absent key.
-    private func readOutcome(account: String) -> LegacyKeyMigration.ReadOutcome {
-        switch readKeychainItem(account: account) {
-        case .value(let value): return .value(value)
-        case .missing: return .missing
-        case .unavailable: return .unavailable
-        }
-    }
-
     /// Accounts holding a key, persisted so `hasAPIKey(for:)` never has to read
     /// a secret — reading one is what raises the login-password prompt.
     private var configuredAccounts: Set<String> {
@@ -645,10 +635,20 @@ public class SettingsStore: ObservableObject {
 
         let loaded = loadKeyPayload()
         loadedPayload = loaded.payload
-        keychainAccessBlocked = !loaded.readable
 
-        if loaded.readable, configuredAccounts != loaded.payload.accounts {
-            setConfiguredAccounts(loaded.payload.accounts)
+        if loaded.readable {
+            if configuredAccounts != loaded.payload.accounts {
+                setConfiguredAccounts(loaded.payload.accounts)
+            }
+            // Now that macOS has handed the payload over, rewrite it so the
+            // item's ACL belongs to this build. Replacing the item is what makes
+            // the prompts stop for good.
+            if keychainAccessBlocked {
+                keychainAccessBlocked = false
+                writePayload(loaded.payload)
+            }
+        } else {
+            keychainAccessBlocked = true
         }
         return loaded.payload
     }
@@ -663,6 +663,25 @@ public class SettingsStore: ObservableObject {
             // A payload exists but macOS will not hand it over. That is not the
             // same as "no keys", and must never be recorded as such.
             return (APIKeyPayload(), false)
+        }
+    }
+
+    /// Answers "which providers have keys" at launch, without ever raising a
+    /// dialog, and records whether macOS refused so the UI can say so instead of
+    /// pretending the key is gone.
+    private func reconcileConfiguredAccounts() {
+        switch readKeychainItem(account: combinedKeychainAccount, allowingPrompt: false) {
+        case .value(let json):
+            let payload = APIKeyPayload(json: json) ?? APIKeyPayload()
+            loadedPayload = payload
+            setConfiguredAccounts(payload.accounts)
+            keychainAccessBlocked = false
+        case .missing:
+            loadedPayload = APIKeyPayload()
+            setConfiguredAccounts([])
+            keychainAccessBlocked = false
+        case .unavailable:
+            keychainAccessBlocked = true
         }
     }
 
@@ -707,27 +726,63 @@ public class SettingsStore: ObservableObject {
 
     /// Folds the old one-item-per-provider storage into the single payload.
     ///
-    /// Returns `false` when a legacy item exists but could not be read, meaning
-    /// the caller must try again rather than record the keys as gone. Only the
+    /// Returns `false` when something exists but could not be read, meaning the
+    /// caller must try again rather than record the keys as gone. Only the
     /// accounts actually read are deleted — an unreadable item is left alone.
-    /// The decision itself lives in `LegacyKeyMigration`, which is pure and
-    /// unit-tested.
+    /// Every read here is prompt-free, because this runs at launch.
+    /// The decision itself lives in `LegacyKeyMigration`, which is pure.
     @discardableResult
     private func migrateLegacyKeys() -> Bool {
-        let plan = LegacyKeyMigration.plan(
-            existing: keyPayload,
-            accounts: legacyKeychainAccounts,
-            read: readOutcome(account:)
-        )
+        var existing = APIKeyPayload()
+        var combinedReadable = true
+        switch readKeychainItem(account: combinedKeychainAccount, allowingPrompt: false) {
+        case .value(let json):
+            existing = APIKeyPayload(json: json) ?? APIKeyPayload()
+        case .missing:
+            break
+        case .unavailable:
+            combinedReadable = false
+        }
 
-        guard !plan.migratedAccounts.isEmpty else { return plan.complete }
+        let plan = LegacyKeyMigration.plan(
+            existing: existing,
+            accounts: legacyKeychainAccounts
+        ) { account in
+            self.readKeychainItem(account: account, allowingPrompt: false)
+        }
+
+        guard !plan.migratedAccounts.isEmpty else { return plan.complete && combinedReadable }
 
         // Merge, so a key entered since the last attempt is never overwritten.
         writePayload(plan.payload)
         for account in plan.migratedAccounts {
             deleteKeychainItem(account: account)
         }
-        return plan.complete
+        return plan.complete && combinedReadable
+    }
+
+    /// Re-reads the payload with the Keychain prompt allowed.
+    ///
+    /// Called from Settings when a background read was refused, so the user can
+    /// hand over access deliberately. Without it they would be stuck: the
+    /// configured-account list stays empty, dictation refuses to start for want
+    /// of a key, and nothing would ever ask again.
+    public func requestKeychainAccess() {
+        let loaded = loadKeyPayload()
+        loadedPayload = loaded.payload
+        objectWillChange.send()
+
+        guard loaded.readable else {
+            keychainAccessBlocked = true
+            return
+        }
+
+        keychainAccessBlocked = false
+        setConfiguredAccounts(loaded.payload.accounts)
+        // Rewrite so the item's ACL belongs to this build — replacing the item
+        // is what stops the prompts for good from here on.
+        guard !loaded.payload.keys.isEmpty else { return }
+        writePayload(loaded.payload)
     }
 
     /// Runs once per install. A fresh install finds no legacy item, so it reads
@@ -735,28 +790,17 @@ public class SettingsStore: ObservableObject {
     ///
     /// Called explicitly by the app at launch rather than from `load()`, and
     /// skipped under XCTest, because a test process touching the real Keychain
-    /// does real damage: an earlier version of this ran from `load()` and a test
-    /// run folded and deleted the user's items, writing the bookkeeping into the
+    /// does real damage: an earlier version of this ran from `load()`, a test run
+    /// folded and deleted the user's items, and the bookkeeping landed in the
     /// test bundle's defaults domain where the app never saw it.
     public func migrateAPIKeyStorageIfNeeded() {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         guard !UserDefaults.standard.bool(forKey: keyStorageMigratedKey) else { return }
 
         let legacyComplete = migrateLegacyKeys()
-        // Loading also reconciles the configured-account list, which is what the
-        // UI reads, and reports whether the payload could be read at all.
-        let payload = keyPayload
-        let complete = legacyComplete && !keychainAccessBlocked
-        keychainAccessBlocked = !complete
-        guard complete else { return }
-
-        // Rewrite the item so its ACL is created by *this* build. A payload
-        // written by an earlier identity — or by another tool — keeps asking for
-        // authorisation until it is replaced, and replacing it is the one thing
-        // that makes the prompts stop for good.
-        if !payload.keys.isEmpty {
-            writePayload(payload)
-        }
+        // Never prompt here: this runs while the app is starting.
+        reconcileConfiguredAccounts()
+        guard legacyComplete, !keychainAccessBlocked else { return }
         UserDefaults.standard.set(true, forKey: keyStorageMigratedKey)
     }
 
@@ -794,7 +838,17 @@ public class SettingsStore: ObservableObject {
     /// no such item" and "there is one but macOS would not let us read it".
     /// Treating those the same is what silently dropped every stored key when
     /// the legacy items needed authorising.
-    private func readKeychainItem(account: String) -> LegacyKeyMigration.ReadOutcome {
+    ///
+    /// `allowingPrompt` must be false for anything that runs without the user
+    /// waiting on it. Measured: a read of an item whose ACL does not authorise
+    /// the build otherwise blocks behind a Keychain dialog — which left the app
+    /// stuck at launch behind a prompt. With interaction off the same read
+    /// returns `errSecInteractionNotAllowed` (-25293) immediately, while an
+    /// absent item still reports `errSecItemNotFound` (-25300).
+    private func readKeychainItem(
+        account: String,
+        allowingPrompt: Bool = true
+    ) -> LegacyKeyMigration.ReadOutcome {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -802,6 +856,17 @@ public class SettingsStore: ObservableObject {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+
+        var previousInteraction = DarwinBoolean(true)
+        if !allowingPrompt {
+            SecKeychainGetUserInteractionAllowed(&previousInteraction)
+            SecKeychainSetUserInteractionAllowed(false)
+        }
+        defer {
+            if !allowingPrompt {
+                SecKeychainSetUserInteractionAllowed(previousInteraction.boolValue)
+            }
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)

@@ -479,15 +479,22 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if settings.keychainAccessBlocked {
-                    Label(
-                        "A key is stored but macOS would not let Typester read it. Quit and reopen Typester, then choose “Always Allow” when it asks.",
-                        systemImage: "exclamationmark.triangle.fill"
-                    )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(
+                            "A key is stored, but macOS has not authorised Typester to read it.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Button("Allow access to stored keys") {
+                            settings.requestKeychainAccess()
+                        }
+                        .controlSize(.small)
+                    }
                     .padding(.horizontal, 14)
                     .padding(.bottom, 14)
-                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
