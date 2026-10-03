@@ -1,6 +1,7 @@
 import AVFoundation
 import Cocoa
 import CoreAudio
+import TypesterObjC
 
 /// Tracks one watchdogged CoreAudio attempt, shared between its worker queue
 /// and the main thread. The first of completion or abandonment wins; the
@@ -102,14 +103,16 @@ public class AudioRecorder {
 
     /// Runs `work` on a private queue and `completion` on the main queue,
     /// unless `work` exceeds the watchdog timeout, in which case `onTimeout`
-    /// runs on the main queue and the attempt is abandoned — a late worker is
-    /// expected to check `state` and clean up after itself.
+    /// runs on the main queue and the attempt is abandoned. A result that
+    /// arrives after abandonment goes to `discardLate` on the worker queue so
+    /// a late-started engine never keeps the microphone open.
     private func runHALAttempt<T>(
         label: String,
         timeout: TimeInterval = halAttemptTimeout,
         work: @escaping (EngineAttemptState) -> T?,
         completion: @escaping (T?) -> Void,
-        onTimeout: @escaping () -> Void
+        onTimeout: @escaping () -> Void,
+        discardLate: ((T) -> Void)? = nil
     ) {
         dispatchPrecondition(condition: .onQueue(.main))
         let state = EngineAttemptState()
@@ -117,7 +120,12 @@ public class AudioRecorder {
         queue.async { [weak self] in
             let value = work(state)
             DispatchQueue.main.async {
-                guard state.claimCompletion() else { return }
+                guard state.claimCompletion() else {
+                    if let value, let discardLate {
+                        queue.async { discardLate(value) }
+                    }
+                    return
+                }
                 completion(value)
                 self?.finishEngineOp()
             }
@@ -193,7 +201,7 @@ public class AudioRecorder {
             self.recycleEngine()
             if wasRecording {
                 self.lifecycle.stop()
-                self.onError?("Microphone was reconfigured — try again")
+                self.onError?("The microphone changed during dictation, so recording stopped early.")
             } else {
                 self.prepareEngine()
             }
@@ -234,15 +242,33 @@ public class AudioRecorder {
         }
     }
 
+    /// Re-prewarms on the newly chosen microphone so the next dictation does
+    /// not pay for a cold engine. An active session keeps its device; the
+    /// start path rebinds on the next session anyway.
+    public func selectedInputDidChange() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard lifecycle.state == .idle else { return }
+        recycleEngine()
+        prepareEngine()
+    }
+
     private func runPrepareAttempt() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard audioEngine == nil else {
             finishEngineOp()
             return
         }
+        let selectedMicUID = SettingsStore.shared.selectedMicrophoneUID
         runHALAttempt(label: "audio engine prewarm") { _ -> AVAudioEngine? in
             let engine = AVAudioEngine()
-            _ = engine.inputNode.outputFormat(forBus: 0)
+            do {
+                let inputNode = try TYPAudioSafety.inputNode(of: engine)
+                Self.bindSelectedDevice(selectedMicUID, engine: engine, inputNode: inputNode)
+                _ = inputNode.outputFormat(forBus: 0)
+            } catch {
+                Debug.log("Audio engine prewarm skipped: \(error.localizedDescription)")
+                return nil
+            }
             return engine
         } completion: { [weak self] engine in
             guard let self, let engine else { return }
@@ -267,7 +293,7 @@ public class AudioRecorder {
                 return
             }
             guard granted else {
-                self.onError?("Microphone permission denied")
+                self.onError?("Typester doesn't have microphone access. Allow it in System Settings → Privacy & Security → Microphone.")
                 return
             }
             self.setupAndStart()
@@ -298,27 +324,26 @@ public class AudioRecorder {
         dispatchPrecondition(condition: .onQueue(.main))
         guard lifecycle.isStarting else { return }
         // Capture settings on the main thread; the attempt runs off-main.
-        let selectedMicID = SettingsStore.shared.selectedMicrophoneID
+        let selectedMicUID = SettingsStore.shared.selectedMicrophoneUID
         let targetRate = targetSampleRate
         enqueueEngineOp { [weak self] in
-            self?.runStartAttempt(selectedMicID: selectedMicID, targetRate: targetRate)
+            self?.runStartAttempt(selectedMicUID: selectedMicUID, targetRate: targetRate)
         }
     }
 
-    private func runStartAttempt(selectedMicID: String?, targetRate: Double) {
+    private func runStartAttempt(selectedMicUID: String?, targetRate: Double) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard lifecycle.isStarting else {
             finishEngineOp()
             return
         }
-        let existingEngine = audioEngine
+        let warmEngine = audioEngine
 
         runHALAttempt(label: "audio engine start") { [weak self] state -> StartOutcome? in
             guard let self else { return nil }
             return self.performEngineStart(
-                engine: existingEngine ?? AVAudioEngine(),
-                engineIsNew: existingEngine == nil,
-                selectedMicID: selectedMicID,
+                warmEngine: warmEngine,
+                selectedMicUID: selectedMicUID,
                 targetRate: targetRate,
                 state: state
             )
@@ -336,23 +361,53 @@ public class AudioRecorder {
             guard self.lifecycle.isStarting else { return }
             self.lifecycle.failStarting()
             self.onError?("The microphone is not responding. An audio device is blocking CoreAudio — try again, or quit and reopen Typester if this persists.")
+        } discardLate: { outcome in
+            guard case .started(let engine, let inputNode, _) = outcome else { return }
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engine.reset()
         }
     }
 
     /// Runs on a private attempt queue. Every HAL-touching step is followed by
-    /// an abandonment check so a timed-out attempt unwinds cleanly.
+    /// an abandonment check so a timed-out attempt unwinds cleanly. AVFAudio
+    /// calls that can raise go through `TYPAudioSafety`, so a device race
+    /// becomes an error message instead of terminating the app.
     private func performEngineStart(
-        engine: AVAudioEngine,
-        engineIsNew: Bool,
-        selectedMicID: String?,
+        warmEngine: AVAudioEngine?,
+        selectedMicUID: String?,
         targetRate: Double,
         state: EngineAttemptState
     ) -> StartOutcome? {
-        if let micID = selectedMicID.flatMap(AudioDeviceID.init) {
-            Self.setDevice(micID, on: engine)
+        let selectedDevice = selectedMicUID.flatMap(AudioInputDevices.deviceID(forUID:))
+        if selectedMicUID != nil, selectedDevice == nil {
+            Debug.log("Saved microphone is not connected — using the system default input")
         }
 
-        let inputNode = engine.inputNode
+        var engine = warmEngine ?? AVAudioEngine()
+        var engineIsNew = warmEngine == nil
+        if !engineIsNew,
+           let warmNode = try? TYPAudioSafety.inputNode(of: engine),
+           InputDeviceRouting.needsFreshEngine(
+               current: AudioInputDevices.currentDevice(of: warmNode),
+               selected: selectedDevice,
+               systemDefault: AudioInputDevices.defaultInputDeviceID()
+           ) {
+            Debug.log("Input device changed since prewarm — building a fresh engine")
+            engine = AVAudioEngine()
+            engineIsNew = true
+        }
+
+        let inputNode: AVAudioInputNode
+        do {
+            inputNode = try TYPAudioSafety.inputNode(of: engine)
+        } catch {
+            Debug.log("Audio input unavailable: \(error.localizedDescription)")
+            return .failed("No microphone is available. Connect one or choose another in the Microphone menu.", dropEngine: true)
+        }
+        if engineIsNew, let selectedDevice {
+            Self.bind(inputNode, of: engine, to: selectedDevice)
+        }
 
         if state.wasAbandoned { return nil }
 
@@ -361,11 +416,11 @@ public class AudioRecorder {
         // Int16 on some Macs (empty STT → “Failed”).
         do {
             Debug.log("Starting audio engine...")
-            try engine.start()
+            try TYPAudioSafety.start(engine)
             Debug.log("Audio engine started successfully")
         } catch {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
-            return .failed("Failed to start audio engine: \(error.localizedDescription)", dropEngine: true)
+            return .failed("Couldn't start the microphone: \(error.localizedDescription)", dropEngine: true)
         }
         if state.wasAbandoned {
             engine.stop()
@@ -373,78 +428,93 @@ public class AudioRecorder {
             return nil
         }
 
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            return .failed("The selected microphone has no usable audio format.", dropEngine: engineIsNew)
+        let hardwareFormat = inputNode.inputFormat(forBus: 0)
+        let clientFormat = inputNode.outputFormat(forBus: 0)
+        guard let tapFormat = AudioTapFormat.make(hardware: hardwareFormat, client: clientFormat) else {
+            engine.stop()
+            return .failed("The selected microphone has no usable audio format.", dropEngine: true)
+        }
+        if hardwareFormat.sampleRate != clientFormat.sampleRate {
+            Debug.log("Input format was stale (client \(clientFormat.sampleRate) Hz, hardware \(hardwareFormat.sampleRate) Hz) — tapping at the hardware rate")
         }
 
-        let sampleRate = targetRate
         // Non-interleaved mono Int16 — `int16ChannelData` is reliable here.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: sampleRate,
+            sampleRate: targetRate,
             channels: 1,
             interleaved: false
-        ) else {
-            return .failed("Failed to create target audio format", dropEngine: engineIsNew)
-        }
-
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            return .failed("Failed to create audio converter", dropEngine: engineIsNew)
+        ), let initialConverter = AVAudioConverter(from: tapFormat, to: targetFormat) else {
+            engine.stop()
+            return .failed("Couldn't prepare audio conversion for this microphone.", dropEngine: true)
         }
 
         // Request ~60 Hz taps; CoreAudio may deliver larger buffers — always size convert from actual frames.
         let inputBufferSize = AVAudioFrameCount(
-            max(256, min(1024, inputFormat.sampleRate / 60.0))
+            max(256, min(1024, tapFormat.sampleRate / 60.0))
         )
-        let rateRatio = sampleRate / max(inputFormat.sampleRate, 1)
 
         // Clear any tap left behind by an interrupted previous session.
         inputNode.removeTap(onBus: 0)
         spectrumAnalyzer.reset()
         silenceDetector.reset()
-        inputNode.installTap(onBus: 0, bufferSize: inputBufferSize, format: inputFormat) { [weak self] buffer, _ in
-            guard let self = self else { return }
+        // Touched only on the audio render thread.
+        var converter = initialConverter
+        do {
+            try TYPAudioSafety.installTap(on: inputNode, bus: 0, bufferSize: inputBufferSize, format: tapFormat) { [weak self] buffer, _ in
+                guard let self = self else { return }
 
-            self.emitAnalysis(from: buffer)
+                self.emitAnalysis(from: buffer)
 
-            let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * rateRatio) + 64
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: max(outCapacity, 1)) else {
-                return
-            }
-
-            var error: NSError?
-            var provided = false
-            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-                if provided {
-                    outStatus.pointee = .noDataNow
-                    return nil
+                if buffer.format != converter.inputFormat {
+                    guard let rebuilt = AVAudioConverter(from: buffer.format, to: targetFormat) else { return }
+                    Debug.log("Tap format changed to \(buffer.format) — rebuilt converter")
+                    converter = rebuilt
                 }
-                provided = true
-                outStatus.pointee = .haveData
-                return buffer
-            }
 
-            converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
-            if let error {
-                Debug.log("Audio convert failed: \(error.localizedDescription)")
-                return
-            }
-
-            guard let pcm = Self.int16PCMData(from: outputBuffer), !pcm.isEmpty else {
-                Debug.log("Audio convert produced no Int16 PCM (format=\(targetFormat))")
-                return
-            }
-
-            if self.silenceDetector.observe(pcm16: pcm, sampleRate: targetFormat.sampleRate) {
-                Debug.log("Mic path is delivering sustained digital silence after convert")
-                DispatchQueue.main.async { [weak self] in
-                    self?.onError?(
-                        "The microphone is sending silence. Check the selected input device, then dictate again."
-                    )
+                let rateRatio = targetFormat.sampleRate / max(buffer.format.sampleRate, 1)
+                let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * rateRatio) + 64
+                guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: max(outCapacity, 1)) else {
+                    return
                 }
+
+                var error: NSError?
+                var provided = false
+                let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+                    if provided {
+                        outStatus.pointee = .noDataNow
+                        return nil
+                    }
+                    provided = true
+                    outStatus.pointee = .haveData
+                    return buffer
+                }
+
+                converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+                if let error {
+                    Debug.log("Audio convert failed: \(error.localizedDescription)")
+                    return
+                }
+
+                guard let pcm = Self.int16PCMData(from: outputBuffer), !pcm.isEmpty else {
+                    Debug.log("Audio convert produced no Int16 PCM (format=\(targetFormat))")
+                    return
+                }
+
+                if self.silenceDetector.observe(pcm16: pcm, sampleRate: targetFormat.sampleRate) {
+                    Debug.log("Mic path is delivering sustained digital silence after convert")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onError?(
+                            "The microphone is sending silence. Check the selected input device, then dictate again."
+                        )
+                    }
+                }
+                self.onAudioBuffer?(pcm)
             }
-            self.onAudioBuffer?(pcm)
+        } catch {
+            Debug.log("Installing the input tap FAILED: \(error.localizedDescription)")
+            engine.stop()
+            return .failed("The microphone changed while starting. Please try again.", dropEngine: true)
         }
         if state.wasAbandoned {
             inputNode.removeTap(onBus: 0)
@@ -495,18 +565,37 @@ public class AudioRecorder {
         }
     }
 
-    private static func setDevice(_ deviceID: AudioDeviceID, on engine: AVAudioEngine) {
-        guard let audioUnit = engine.inputNode.audioUnit else { return }
+    /// Binds a fresh engine to the saved microphone (system default when the
+    /// UID is nil or the device is gone).
+    private static func bindSelectedDevice(_ uid: String?, engine: AVAudioEngine, inputNode: AVAudioInputNode) {
+        guard let uid else { return }
+        guard let deviceID = AudioInputDevices.deviceID(forUID: uid) else {
+            Debug.log("Saved microphone is not connected — prewarming the system default input")
+            return
+        }
+        bind(inputNode, of: engine, to: deviceID)
+    }
 
-        var deviceIDCopy = deviceID
-        AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &deviceIDCopy,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+    /// Switching the device makes AVAudioEngine post a configuration change
+    /// ~100 ms later, from a private queue. Waiting for it here keeps that
+    /// self-inflicted notification away from the long-lived observer, which
+    /// would otherwise tear down the engine it was just given.
+    private static func bind(_ inputNode: AVAudioInputNode, of engine: AVAudioEngine, to deviceID: AudioDeviceID) {
+        guard AudioInputDevices.currentDevice(of: inputNode) != deviceID else { return }
+        let settled = DispatchSemaphore(value: 0)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { _ in settled.signal() }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        guard AudioInputDevices.bind(inputNode, to: deviceID) else {
+            Debug.log("Couldn't switch to input device \(deviceID) — staying on the current input")
+            return
+        }
+        if settled.wait(timeout: .now() + 0.5) == .timedOut {
+            Debug.log("No configuration change after switching input device \(deviceID)")
+        }
     }
 
     // MARK: - Teardown attempt

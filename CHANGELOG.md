@@ -2,6 +2,19 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.13] — 2026-10-03
+
+### Fixed
+- **Typester quit when dictation started with a chosen microphone.** The engine is warmed up on the default input and then switched to the saved mic, but AVAudioEngine kept reporting the previous device's sample rate (44.1 kHz) while the new one ran at 48 kHz. Tapping with that stale rate raises an Objective-C exception Swift cannot catch, so the app aborted. The tap now uses the rate the hardware is actually running at, which also stops audio from being resampled from the wrong rate.
+- **No more aborts from AVFAudio.** Getting the input node, starting the engine and installing the tap now go through a small Objective-C guard, so a device race or a Mac with no input becomes an error message instead of a crash.
+- **The first dictation after launch could come back empty.** Switching the device on the warm engine fired a configuration change that tore the engine down just after recording began. A mic change now builds a fresh engine, and the self-inflicted notification is absorbed before the engine is handed over.
+- **A late-starting engine could keep the microphone open** after the 15-second watchdog had given up on it; it is now shut down.
+- Two Accessibility force-casts on another app's reply, and an unsynchronised read of the transcription provider from the audio thread, could crash Typester; both are guarded.
+
+### Changed
+- **The saved microphone is remembered by its device UID.** CoreAudio's numeric device IDs change across reboots and replugs, so the old setting could silently point at another device. Your current choice is migrated automatically, and the Microphone menu says when the saved mic is not connected.
+- **Microphone problems explain themselves.** If speech was captured before a failure, it is transcribed as usual; if nothing usable was captured, an alert says why (no access, mic not responding, mic sending silence) instead of the session stopping silently.
+
 ## [1.25.12] — 2026-09-24
 
 ### Fixed

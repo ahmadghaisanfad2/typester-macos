@@ -9,9 +9,15 @@ let package = Package(
     name: "typester",
     platforms: [.macOS(.v13)],
     targets: [
+        // Objective-C shims for AVFAudio calls that raise NSExceptions
+        .target(
+            name: "TypesterObjC",
+            path: "Sources/TypesterObjC"
+        ),
         // Non-UI logic (builds with Command Line Tools; used by tests)
         .target(
             name: "TypesterCore",
+            dependencies: ["TypesterObjC"],
             path: "Sources/TypesterLogic"
         ),
         // SwiftUI / AppKit UI (requires SwiftUI macro plugins; CI / full Xcode)
@@ -25,14 +31,14 @@ let package = Package(
             name: "typester",
             dependencies: ["TypesterUI"],
             path: "Sources",
-            exclude: ["TypesterCore", "TypesterLogic", "DictionarySmoke", "Info.plist", "typester.entitlements"],
+            exclude: ["TypesterCore", "TypesterLogic", "TypesterObjC", "DictionarySmoke", "Info.plist", "typester.entitlements"],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", "\(packageDir)/Sources/Info.plist"])
             ]
         ),
         .testTarget(
             name: "TypesterTests",
-            dependencies: ["TypesterCore"],
+            dependencies: ["TypesterCore", "TypesterObjC"],
             path: "Tests"
         ),
         // CLI smoke checks for environments without XCTest (Command Line Tools only)
