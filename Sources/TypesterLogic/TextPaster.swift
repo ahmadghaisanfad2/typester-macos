@@ -155,7 +155,8 @@ public class TextPaster {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focused = focusedRef else {
+              let focused = focusedRef,
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else {
             return false
         }
 

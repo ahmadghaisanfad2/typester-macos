@@ -48,7 +48,8 @@ public class SettingsStore: ObservableObject {
         }
     }
 
-    @Published public var selectedMicrophoneID: String? = nil {
+    /// CoreAudio device UID of the chosen microphone; nil means system default.
+    @Published public var selectedMicrophoneUID: String? = nil {
         didSet {
             saveSelectedMicrophone()
         }
@@ -239,7 +240,8 @@ public class SettingsStore: ObservableObject {
     private let activationModeKey = "activationMode"
     private let pressToSpeakKeyKey = "pressToSpeakKey"
     private let languageHintsKey = "languageHints"
-    private let selectedMicrophoneKey = "selectedMicrophone"
+    private let legacySelectedMicrophoneKey = "selectedMicrophone"
+    private let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
     private let dictionaryTermsKey = "dictionaryTerms"
     private let correctionPairsKey = "correctionPairs"
     private let automaticDictionaryLearningEnabledKey = "automaticDictionaryLearningEnabled"
@@ -433,11 +435,21 @@ public class SettingsStore: ObservableObject {
     }
 
     private func loadSelectedMicrophone() {
-        selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneKey)
+        let defaults = UserDefaults.standard
+        if let legacyID = defaults.string(forKey: legacySelectedMicrophoneKey) {
+            defaults.removeObject(forKey: legacySelectedMicrophoneKey)
+            selectedMicrophoneUID = MicrophoneSelectionMigration.migrate(
+                storedLegacyID: legacyID,
+                uidForDeviceID: AudioInputDevices.uid(for:)
+            )
+            saveSelectedMicrophone()
+            return
+        }
+        selectedMicrophoneUID = defaults.string(forKey: selectedMicrophoneUIDKey)
     }
 
     private func saveSelectedMicrophone() {
-        UserDefaults.standard.set(selectedMicrophoneID, forKey: selectedMicrophoneKey)
+        UserDefaults.standard.set(selectedMicrophoneUID, forKey: selectedMicrophoneUIDKey)
     }
 
     private func loadDictionaryTerms() {

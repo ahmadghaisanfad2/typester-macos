@@ -196,7 +196,8 @@ public struct AccessibilityPasteTarget {
             kAXFocusedUIElementAttribute as CFString,
             &focusedRef
         ) == .success,
-        let focusedRef else {
+        let focusedRef,
+        CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
             return nil
         }
 

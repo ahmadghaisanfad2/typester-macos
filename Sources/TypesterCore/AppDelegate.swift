@@ -17,7 +17,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let textPaster = TextPaster()
     private let automaticCorrectionMonitor = AutomaticCorrectionMonitor()
     private let historyStore = TranscriptHistoryStore.shared
-    private var sttProvider: STTProvider!
+    // The audio render thread reads this while a provider switch can replace it on main.
+    private let sttProviderLock = NSLock()
+    private var lockedSTTProvider: STTProvider!
+    private var sttProvider: STTProvider! {
+        get { sttProviderLock.withLock { lockedSTTProvider } }
+        set { sttProviderLock.withLock { lockedSTTProvider = newValue } }
+    }
     private var lastTranscript = ""
 
     private func createSTTProvider() -> STTProvider {
@@ -1140,14 +1146,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Microphone submenu
         let micMenu = NSMenu()
-        let inputDevices = getInputDevices()
-        let selectedMicID = SettingsStore.shared.selectedMicrophoneID
+        let inputDevices = AudioInputDevices.all()
+        let selectedMicUID = SettingsStore.shared.selectedMicrophoneUID
+        let selectedMicMissing = selectedMicUID != nil && !inputDevices.contains { $0.uid == selectedMicUID }
 
         let defaultMicItem = NSMenuItem(title: "System default", action: #selector(selectMicrophone(_:)), keyEquivalent: "")
         defaultMicItem.target = self
         defaultMicItem.representedObject = nil
-        defaultMicItem.state = selectedMicID == nil ? .on : .off
+        defaultMicItem.state = selectedMicUID == nil ? .on : (selectedMicMissing ? .mixed : .off)
         micMenu.addItem(defaultMicItem)
+
+        if selectedMicMissing {
+            let note = NSMenuItem(title: "Saved microphone not connected — using system default", action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            micMenu.addItem(note)
+        }
 
         if !inputDevices.isEmpty {
             micMenu.addItem(.separator())
@@ -1156,8 +1169,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for device in inputDevices {
             let item = NSMenuItem(title: device.name, action: #selector(selectMicrophone(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = NSNumber(value: device.id)
-            item.state = selectedMicID == String(device.id) ? .on : .off
+            item.representedObject = device.uid
+            item.state = selectedMicUID == device.uid ? .on : .off
             micMenu.addItem(item)
         }
 
@@ -1664,11 +1677,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
-        if let deviceID = sender.representedObject as? NSNumber {
-            SettingsStore.shared.selectedMicrophoneID = String(deviceID.uint32Value)
-        } else {
-            SettingsStore.shared.selectedMicrophoneID = nil
-        }
+        SettingsStore.shared.selectedMicrophoneUID = sender.representedObject as? String
+        audioRecorder.selectedInputDidChange()
         rebuildMenu()
     }
 
@@ -1684,91 +1694,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         SettingsStore.shared.languageHints = hints
         rebuildMenu()
-    }
-
-    private struct AudioInputDevice {
-        let id: AudioDeviceID
-        let name: String
-    }
-
-    private func getInputDevices() -> [AudioInputDevice] {
-        var devices: [AudioInputDevice] = []
-
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var dataSize: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize) == noErr else {
-            return devices
-        }
-
-        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
-
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize, &deviceIDs) == noErr else {
-            return devices
-        }
-
-        for deviceID in deviceIDs {
-            // Check if device has input channels
-            var inputAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyStreamConfiguration,
-                mScope: kAudioDevicePropertyScopeInput,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            var inputSize: UInt32 = 0
-            guard AudioObjectGetPropertyDataSize(deviceID, &inputAddress, 0, nil, &inputSize) == noErr, inputSize > 0 else {
-                continue
-            }
-
-            let bufferListPointer = UnsafeMutableRawPointer.allocate(byteCount: Int(inputSize), alignment: MemoryLayout<AudioBufferList>.alignment)
-            defer { bufferListPointer.deallocate() }
-
-            guard AudioObjectGetPropertyData(deviceID, &inputAddress, 0, nil, &inputSize, bufferListPointer) == noErr else {
-                continue
-            }
-
-            let bufferList = bufferListPointer.assumingMemoryBound(to: AudioBufferList.self).pointee
-            guard bufferList.mNumberBuffers > 0 else { continue }
-
-            // Get device name
-            var nameAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyDeviceNameCFString,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            var name: Unmanaged<CFString>?
-            var nameSize = UInt32(MemoryLayout<CFString?>.size)
-
-            if AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name) == noErr,
-               let deviceName = name?.takeUnretainedValue() as String? {
-                // Check transport type to filter virtual devices
-                var transportAddress = AudioObjectPropertyAddress(
-                    mSelector: kAudioDevicePropertyTransportType,
-                    mScope: kAudioObjectPropertyScopeGlobal,
-                    mElement: kAudioObjectPropertyElementMain
-                )
-                var transportType: UInt32 = 0
-                var transportSize = UInt32(MemoryLayout<UInt32>.size)
-
-                if AudioObjectGetPropertyData(deviceID, &transportAddress, 0, nil, &transportSize, &transportType) == noErr {
-                    // Skip virtual and aggregate devices
-                    if transportType == kAudioDeviceTransportTypeVirtual ||
-                       transportType == kAudioDeviceTransportTypeAggregate {
-                        continue
-                    }
-                }
-
-                devices.append(AudioInputDevice(id: deviceID, name: deviceName))
-            }
-        }
-
-        return devices
     }
 
     // MARK: - Hotkey
@@ -1851,16 +1776,29 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.subtitleOverlay.updateLevel(level)
         }
 
-        audioRecorder.onError = { [weak self] _ in
-            self?.stopRecording()
+        audioRecorder.onError = { [weak self] message in
+            self?.handleMicrophoneFailure(message)
         }
 
         setupSTTCallbacks()
     }
 
-    private func showError(_ message: String) {
+    private func handleMicrophoneFailure(_ message: String) {
+        Debug.log("Microphone failure: \(message)")
+        guard isRecording else { return }
+        if !CaptureSilenceDetector.isSilent(pcm16: sessionAudioPCM.snapshot()) {
+            // Real speech was captured: transcribe it. No alert — it would
+            // steal focus from the app the transcript pastes into.
+            stopRecording()
+            return
+        }
+        cancelActiveTranscription()
+        showError(message, title: "Microphone problem")
+    }
+
+    private func showError(_ message: String, title: String = "Transcription failed") {
         let alert = NSAlert()
-        alert.messageText = "Transcription failed"
+        alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open Settings")
