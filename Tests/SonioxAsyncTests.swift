@@ -40,12 +40,12 @@ final class SonioxAsyncTests: XCTestCase {
 
     func testRealtimeConfigDisablesEndpointWhenPasteOnPauseOff() {
         let config = SonioxRealtimeSessionConfig.build(
-            apiKey: "key",
             model: "stt-rt-v5",
             pasteOnPause: false,
             languageHints: [],
             context: nil
         )
+        XCTAssertNil(config["api_key"])
         XCTAssertEqual(config["enable_endpoint_detection"] as? Bool, false)
         XCTAssertNil(config["endpoint_sensitivity"])
         XCTAssertNil(config["max_endpoint_delay_ms"])
@@ -53,7 +53,6 @@ final class SonioxAsyncTests: XCTestCase {
 
     func testRealtimeConfigEnablesConservativeEndpointWhenPasteOnPauseOn() {
         let config = SonioxRealtimeSessionConfig.build(
-            apiKey: "key",
             model: "stt-rt-v5",
             pasteOnPause: true,
             languageHints: ["en"],
@@ -64,6 +63,30 @@ final class SonioxAsyncTests: XCTestCase {
         XCTAssertEqual(config["max_endpoint_delay_ms"] as? Int, 3000)
         XCTAssertEqual(config["language_hints"] as? [String], ["en"])
         XCTAssertNotNil(config["context"])
+        XCTAssertNil(config["api_key"])
+    }
+
+    func testWebSocketRequestAuthenticatesOnHandshake() throws {
+        let request = try XCTUnwrap(SonioxConnectionConfig.makeWebSocketRequest(apiKey: "snx_test"))
+        XCTAssertEqual(request.url, SonioxConnectionConfig.webSocketURL)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer snx_test")
+        XCTAssertNil(SonioxConnectionConfig.makeWebSocketRequest(apiKey: ""))
+    }
+
+    func testUnauthenticatedErrorFrameSurfacesMessage() {
+        let config = SonioxConnectionConfig()
+        let json: [String: Any] = [
+            "error_code": 401,
+            "error_type": "unauthenticated",
+            "error_message": "Missing API key."
+        ]
+        let results = config.parseResponse(json)
+        XCTAssertEqual(results.count, 1)
+        if case .error(let message) = results[0] {
+            XCTAssertEqual(message, "Missing API key.")
+        } else {
+            XCTFail("expected error result")
+        }
     }
 
     // MARK: - WAV encoder

@@ -43,7 +43,6 @@ final class VoiceFocusConfigTests: XCTestCase {
 
     func testSonioxConfigEnablesDiarizationWhenFocusOn() {
         let config = SonioxRealtimeSessionConfig.build(
-            apiKey: "k",
             model: "stt-rt-v5",
             pasteOnPause: false,
             languageHints: ["en"],
@@ -55,7 +54,6 @@ final class VoiceFocusConfigTests: XCTestCase {
 
     func testSonioxConfigOmitsDiarizationWhenFocusOff() {
         let config = SonioxRealtimeSessionConfig.build(
-            apiKey: "k",
             model: "stt-rt-v5",
             pasteOnPause: false,
             languageHints: [],

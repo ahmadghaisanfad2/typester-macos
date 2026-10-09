@@ -3,15 +3,15 @@ import Foundation
 /// Builds the Soniox real-time WebSocket session config JSON.
 public enum SonioxRealtimeSessionConfig {
     public static func build(
-        apiKey: String,
         model: String,
         pasteOnPause: Bool,
         languageHints: [String],
         context: [String: Any]?,
         focusOnMyVoice: Bool = false
     ) -> [String: Any] {
+        // The API key rides on the WebSocket handshake. Repeating it here is
+        // accepted only when it matches; a different key is refused.
         var config: [String: Any] = [
-            "api_key": apiKey,
             "model": model,
             "audio_format": "pcm_s16le",
             "sample_rate": 16000,
@@ -52,9 +52,20 @@ public struct SonioxConnectionConfig: STTConnectionConfig {
     /// Soniox realtime tokens include spaces at word boundaries when needed.
     public var transcriptJoinStyle: TranscriptTokenJoinStyle { .concatenate }
 
+    public static let webSocketURL = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
+
+    /// Handshake request. Soniox reads the key from `Authorization` and refuses
+    /// connections that only send `api_key` in the start message after 15 Jan 2027.
+    public static func makeWebSocketRequest(apiKey: String) -> URLRequest? {
+        guard !apiKey.isEmpty else { return nil }
+        var request = URLRequest(url: webSocketURL)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
     public func makeWebSocketRequest() -> URLRequest? {
-        let url = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
-        return URLRequest(url: url)
+        guard let apiKey else { return nil }
+        return Self.makeWebSocketRequest(apiKey: apiKey)
     }
 
     public func parseResponse(_ json: [String: Any]) -> [STTParseResult] {
@@ -116,10 +127,9 @@ public class SonioxClient: STTClientBase {
     }
 
     private func sendConfiguration() {
-        guard let apiKey = SettingsStore.shared.apiKey else { return }
+        guard SettingsStore.shared.apiKey != nil else { return }
 
         let config = SonioxRealtimeSessionConfig.build(
-            apiKey: apiKey,
             model: STTProviderType.soniox.modelID,
             pasteOnPause: SettingsStore.shared.pasteOnPause,
             languageHints: SettingsStore.shared.languageHints,
