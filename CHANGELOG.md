@@ -2,6 +2,11 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.14] — 2026-10-09
+
+### Changed
+- **Soniox realtime authenticates when the WebSocket opens.** Soniox will refuse connections that only send the API key in the first message after 15 January 2027. Typester now sends `Authorization: Bearer` on the handshake and leaves `api_key` out of the session config. The key you already saved still works.
+
 ## [1.25.13] — 2026-10-03
 
 ### Fixed
