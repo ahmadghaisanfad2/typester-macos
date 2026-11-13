@@ -2,7 +2,7 @@
 
 All notable changes to Typester are documented in this file.
 
-## [Unreleased]
+## [1.25.15] — 2026-11-13
 
 ### Fixed
 - **Idle Typester kept coreaudiod and itself busy (tens of % CPU each) and held the microphone.** Typester pre-warmed an audio engine at launch, after every wake, on every audio configuration change and on every mic change, and kept it between dictations. Reading that engine's input node can loop forever inside AVFAudio against coreaudiod; the watchdog gave up on it but could not stop the spinning thread, so the CPU burn lasted until Typester was quit. Typester now touches CoreAudio only while you dictate: the engine is built when dictation starts and released when it stops.
