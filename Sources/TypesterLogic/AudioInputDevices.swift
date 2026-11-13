@@ -154,16 +154,6 @@ enum AudioTapFormat {
     }
 }
 
-enum InputDeviceRouting {
-    /// Switching the device of an engine that is already observed fires
-    /// `AVAudioEngineConfigurationChange`, whose handler tears the engine down
-    /// mid-recording. A device change therefore gets a fresh engine instead.
-    static func needsFreshEngine(current: AudioDeviceID?, selected: AudioDeviceID?, systemDefault: AudioDeviceID?) -> Bool {
-        guard let current, let target = selected ?? systemDefault else { return false }
-        return current != target
-    }
-}
-
 enum MicrophoneSelectionMigration {
     /// Earlier builds saved the raw `AudioDeviceID`, which CoreAudio reassigns
     /// across reboots and reconnects; carry it over as the device UID.

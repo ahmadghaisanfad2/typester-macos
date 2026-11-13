@@ -76,11 +76,30 @@ public enum SonioxTranscribeMode: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    public var modelID: String {
+    /// Built-in model used when the user has not typed their own model name.
+    public var defaultModelID: String {
         switch self {
-        case .realtime: return "stt-rt-v5"
-        case .async: return "stt-async-v5"
+        case .realtime: return "stt-rt-v6"
+        case .async: return "stt-async-v6"
         }
+    }
+
+    /// Model actually sent to Soniox: the user's custom name from Settings,
+    /// or `defaultModelID` when that field is empty.
+    public var modelID: String {
+        SettingsStore.shared.sonioxModelID(for: self)
+    }
+}
+
+/// Per-model Soniox request capabilities. Custom model names make this a
+/// runtime question rather than a compile-time one.
+public enum SonioxModelCapabilities {
+    /// `endpoint_sensitivity` is documented as v5-only; other models may
+    /// reject an unknown parameter, so it is sent only where it is supported.
+    /// `stt-rt-v4` is an alias of v5.
+    public static func supportsEndpointSensitivity(model: String) -> Bool {
+        let id = model.lowercased()
+        return id.hasPrefix("stt-rt-v5") || id.hasPrefix("stt-rt-v4")
     }
 }
 

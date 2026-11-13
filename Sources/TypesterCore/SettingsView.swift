@@ -342,6 +342,8 @@ struct SettingsView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(Codex.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                sonioxCustomModelField
             }
         case .deepgram:
             HStack {
@@ -359,6 +361,42 @@ struct SettingsView: View {
             openRouterModelRow
         case .xai:
             xaiModelRow
+        }
+    }
+
+    /// Lets the user point Typester at a newer Soniox model by name, without a
+    /// code change. Blank uses the built-in default shown as the placeholder.
+    private var sonioxCustomModelField: some View {
+        let mode = settings.sonioxMode
+        let binding = mode == .realtime ? $settings.sonioxRealtimeModel : $settings.sonioxAsyncModel
+        let isCustom = !binding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Model name")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Codex.textSecondary)
+
+                Spacer()
+
+                TextField(mode.defaultModelID, text: binding)
+                    .textFieldStyle(.plain)
+                    .font(.mono(12))
+                    .autocorrectionDisabled()
+                    .fieldCard()
+                    .frame(width: 200)
+
+                if isCustom {
+                    Button("Reset") { binding.wrappedValue = "" }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 12))
+                        .help("Use the built-in default, \(mode.defaultModelID).")
+                }
+            }
+
+            Text("Leave blank to use \(mode.defaultModelID). Type another Soniox model name (for example a newer release) to switch without updating Typester.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Codex.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
