@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [1.25.16] — 2026-11-13
+
+### Fixed
+- **Capitals appeared mid-sentence with no period before them.** Casual dropped sentence periods but still capitalized the next word, so text read like “aku pergi ke pasar Terus aku makan”. Capitalization now follows the punctuation that is actually in the pasted text: a word is capitalized at the start of a dictation and after `.`, `?` or `!`, and nowhere else. Dictionary words, acronyms (NASA), mixed-case words (iPhone), “I”, and names that appear capitalized elsewhere in the same dictation keep their capital.
+- **With paste-on-pause, every chunk started with a capital.** A chunk that continues a sentence the previous chunk left unfinished now starts lowercase.
+- **Numbers and abbreviations were split and capitalized.** “3.5 dollar” became “3. 5 Dollar” and “e.g. apples” became “e. G. Apples”. Decimals, thousands separators, times (10:30) and dotted abbreviations are now left intact.
+
+### Changed
+- **Casual asks the transcription provider to capitalize only names, acronyms, and the word after `?` or `!`,** so fewer stray capitals arrive in the first place.
+
 ## [1.25.15] — 2026-11-13
 
 ### Fixed
