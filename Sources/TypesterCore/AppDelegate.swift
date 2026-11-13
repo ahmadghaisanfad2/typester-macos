@@ -1440,10 +1440,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let text = raw {
             lastTranscript = text
             let replaced = SettingsStore.shared.applyReplacements(text)
+            // A later paste-on-pause chunk continues the sentence when the
+            // previous chunk did not end one, so it must not open with a capital.
             let formatted = TranscriptFormatter.format(
                 replaced,
                 removeFillers: SettingsStore.shared.removeFillerWords,
-                style: SettingsStore.shared.transcriptStyle
+                style: SettingsStore.shared.transcriptStyle,
+                preservedTerms: SettingsStore.shared.sonioxTerms,
+                continuesSentence: TranscriptFormatter.continuesSentence(after: sessionPastedText)
             )
             let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
             textPaster.paste(
@@ -1641,7 +1645,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let formatted = TranscriptFormatter.format(
             replaced,
             removeFillers: SettingsStore.shared.removeFillerWords,
-            style: SettingsStore.shared.transcriptStyle
+            style: SettingsStore.shared.transcriptStyle,
+            preservedTerms: SettingsStore.shared.sonioxTerms
         )
         let pasteText = formatted.hasSuffix(" ") ? formatted : formatted + " "
         textPaster.paste(

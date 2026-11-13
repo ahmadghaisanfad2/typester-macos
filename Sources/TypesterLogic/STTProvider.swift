@@ -128,7 +128,7 @@ public enum TranscriptStyle: String, Codable, CaseIterable, Identifiable {
     public var helpText: String {
         switch self {
         case .minimal: return "No punctuation or capitalization."
-        case .casual: return "Sentence periods dropped; question and exclamation marks kept."
+        case .casual: return "Sentence periods dropped, along with the capital after them; question and exclamation marks kept."
         case .neutral: return "Keep the provider's punctuation as-is."
         case .formal: return "Full punctuation, with a sentence-ending period."
         }
@@ -141,7 +141,7 @@ public enum TranscriptStyle: String, Codable, CaseIterable, Identifiable {
         case .minimal:
             return "Output plain unpunctuated text. Do not add periods, commas, or other punctuation, and do not capitalize words."
         case .casual:
-            return "Use minimal punctuation. Avoid periods and commas; only add question marks or exclamation points when clearly needed."
+            return "Use minimal punctuation. Avoid periods and commas; only add question marks or exclamation points when clearly needed. Capitalize only names, acronyms, and the first word after a question mark or exclamation point."
         case .neutral:
             return nil
         case .formal:
@@ -156,7 +156,7 @@ public enum TranscriptStyle: String, Codable, CaseIterable, Identifiable {
         case .minimal:
             return "Output plain unpunctuated text. Do not add periods, commas, or other punctuation, and do not capitalize words."
         case .casual:
-            return "Use minimal punctuation: avoid periods and commas; only add question marks or exclamation points when clearly needed."
+            return "Use minimal punctuation: avoid periods and commas; only add question marks or exclamation points when clearly needed. Capitalize only names, acronyms, and the first word after a question mark or exclamation point."
         case .neutral:
             return "Transcribe clearly with proper punctuation, commas, periods, and sentence capitalization."
         case .formal:
