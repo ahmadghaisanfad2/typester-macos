@@ -43,28 +43,6 @@ final class AudioTapFormatTests: XCTestCase {
     }
 }
 
-final class InputDeviceRoutingTests: XCTestCase {
-    func testKeepsWarmEngineWhenItAlreadyUsesTheSelectedDevice() {
-        XCTAssertFalse(InputDeviceRouting.needsFreshEngine(current: 114, selected: 114, systemDefault: 129))
-    }
-
-    func testRebuildsWhenTheSelectedDeviceDiffers() {
-        XCTAssertTrue(InputDeviceRouting.needsFreshEngine(current: 129, selected: 114, systemDefault: 129))
-    }
-
-    func testRebuildsWhenReturningToSystemDefaultFromAnExplicitDevice() {
-        XCTAssertTrue(InputDeviceRouting.needsFreshEngine(current: 114, selected: nil, systemDefault: 129))
-    }
-
-    func testKeepsEngineOnSystemDefault() {
-        XCTAssertFalse(InputDeviceRouting.needsFreshEngine(current: 129, selected: nil, systemDefault: 129))
-    }
-
-    func testKeepsEngineWhenTheCurrentDeviceIsUnknown() {
-        XCTAssertFalse(InputDeviceRouting.needsFreshEngine(current: nil, selected: 114, systemDefault: 129))
-    }
-}
-
 final class MicrophoneSelectionMigrationTests: XCTestCase {
     func testLegacyNumericIDBecomesTheDeviceUID() {
         let uid = MicrophoneSelectionMigration.migrate(storedLegacyID: "114") { id in

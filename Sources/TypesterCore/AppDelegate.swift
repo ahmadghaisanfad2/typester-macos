@@ -1753,8 +1753,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Recycle the audio engine after sleep/wake — a cached engine holding
         // a stale CoreAudio device crashes when restarted after wake.
         audioRecorder.installSleepWakeHandlers()
-        // Pre-warm CoreAudio/AVAudioEngine — cold creation can take multiple seconds with Discord open.
-        audioRecorder.prepareEngine()
 
         audioRecorder.onAudioBuffer = { [weak self] data in
             guard let self, self.isRecording else { return }

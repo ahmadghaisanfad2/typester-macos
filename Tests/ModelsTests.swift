@@ -186,7 +186,7 @@ final class ModelsTests: XCTestCase {
         let previous = SettingsStore.shared.sonioxMode
         defer { SettingsStore.shared.sonioxMode = previous }
         SettingsStore.shared.sonioxMode = .realtime
-        XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
+        XCTAssertEqual(STTProviderType.soniox.modelID, SettingsStore.shared.sonioxModelID(for: .realtime))
         XCTAssertEqual(STTProviderType.deepgram.modelID, "nova-3")
         XCTAssertEqual(STTProviderType.openrouter.modelID, SettingsStore.shared.openrouterModelID)
         XCTAssertEqual(STTProviderType.xai.modelID, "grok-voice-transcribe-2.0")

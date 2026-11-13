@@ -15,9 +15,42 @@ final class SonioxAsyncTests: XCTestCase {
         XCTAssertEqual(SonioxTranscribeMode.async.displayName, "Async")
     }
 
-    func testSonioxTranscribeModeModelIDs() {
-        XCTAssertEqual(SonioxTranscribeMode.realtime.modelID, "stt-rt-v5")
-        XCTAssertEqual(SonioxTranscribeMode.async.modelID, "stt-async-v5")
+    func testSonioxTranscribeModeDefaultModelIDsAreV6() {
+        XCTAssertEqual(SonioxTranscribeMode.realtime.defaultModelID, "stt-rt-v6")
+        XCTAssertEqual(SonioxTranscribeMode.async.defaultModelID, "stt-async-v6")
+    }
+
+    func testCustomSonioxModelOverridesDefaultAndBlankFallsBack() {
+        let store = SettingsStore.shared
+        let previous = (store.sonioxRealtimeModel, store.sonioxAsyncModel)
+        defer {
+            store.sonioxRealtimeModel = previous.0
+            store.sonioxAsyncModel = previous.1
+        }
+
+        store.sonioxRealtimeModel = "  stt-rt-v7  "
+        store.sonioxAsyncModel = ""
+        XCTAssertEqual(SonioxTranscribeMode.realtime.modelID, "stt-rt-v7")
+        XCTAssertEqual(SonioxTranscribeMode.async.modelID, "stt-async-v6")
+
+        store.sonioxRealtimeModel = "   "
+        XCTAssertEqual(SonioxTranscribeMode.realtime.modelID, "stt-rt-v6")
+    }
+
+    func testEndpointSensitivityIsOnlySentToModelsThatSupportIt() {
+        XCTAssertTrue(SonioxModelCapabilities.supportsEndpointSensitivity(model: "stt-rt-v5"))
+        XCTAssertTrue(SonioxModelCapabilities.supportsEndpointSensitivity(model: "stt-rt-v4"))
+        XCTAssertFalse(SonioxModelCapabilities.supportsEndpointSensitivity(model: "stt-rt-v6"))
+
+        let v6 = SonioxRealtimeSessionConfig.build(
+            model: "stt-rt-v6",
+            pasteOnPause: true,
+            languageHints: [],
+            context: nil
+        )
+        XCTAssertEqual(v6["enable_endpoint_detection"] as? Bool, true)
+        XCTAssertNil(v6["endpoint_sensitivity"])
+        XCTAssertEqual(v6["max_endpoint_delay_ms"] as? Int, 3000)
     }
 
     func testSonioxTranscribeModeAllCases() {
@@ -30,10 +63,10 @@ final class SonioxAsyncTests: XCTestCase {
         defer { store.sonioxMode = previous }
 
         store.sonioxMode = .realtime
-        XCTAssertEqual(STTProviderType.soniox.modelID, "stt-rt-v5")
+        XCTAssertEqual(STTProviderType.soniox.modelID, store.sonioxModelID(for: .realtime))
 
         store.sonioxMode = .async
-        XCTAssertEqual(STTProviderType.soniox.modelID, "stt-async-v5")
+        XCTAssertEqual(STTProviderType.soniox.modelID, store.sonioxModelID(for: .async))
     }
 
     // MARK: - Realtime session config (endpoint gating)

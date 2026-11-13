@@ -23,7 +23,9 @@ public enum SonioxRealtimeSessionConfig {
         if pasteOnPause {
             config["enable_endpoint_detection"] = true
             // Prefer fewer false endpoints so brief breaths don't split sentences.
-            config["endpoint_sensitivity"] = -0.7
+            if SonioxModelCapabilities.supportsEndpointSensitivity(model: model) {
+                config["endpoint_sensitivity"] = -0.7
+            }
             config["max_endpoint_delay_ms"] = 3000
         } else {
             config["enable_endpoint_detection"] = false

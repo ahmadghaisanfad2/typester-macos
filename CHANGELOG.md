@@ -2,6 +2,16 @@
 
 All notable changes to Typester are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Idle Typester kept coreaudiod and itself busy (tens of % CPU each) and held the microphone.** Typester pre-warmed an audio engine at launch, after every wake, on every audio configuration change and on every mic change, and kept it between dictations. Reading that engine's input node can loop forever inside AVFAudio against coreaudiod; the watchdog gave up on it but could not stop the spinning thread, so the CPU burn lasted until Typester was quit. Typester now touches CoreAudio only while you dictate: the engine is built when dictation starts and released when it stops.
+- **Sleeping during dictation left Typester out of sync.** The recorder stopped on wake but the app still thought it was recording, so the next hotkey press did nothing visible. The session now ends cleanly (speech already captured is still transcribed).
+
+### Changed
+- **Soniox now uses STT v6** (`stt-rt-v6` real-time, `stt-async-v6` async). v5 is deprecated by Soniox and is removed on 15 December 2026.
+- **The Soniox model name is editable in Settings.** Leave it blank for the built-in default, or type another model name to switch without updating Typester. `endpoint_sensitivity` (documented as v5-only) is sent only to v5 models.
+
 ## [1.25.14] — 2026-10-09
 
 ### Changed

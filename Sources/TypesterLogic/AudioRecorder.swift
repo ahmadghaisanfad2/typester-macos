@@ -168,21 +168,22 @@ public class AudioRecorder {
         dispatchPrecondition(condition: .onQueue(.main))
         Debug.log("System woke — recycling audio engine")
         recycleEngine()
-        if lifecycle.state == .recording || lifecycle.state == .starting {
-            // A dictation was interrupted by sleep; restart cleanly so the
-            // very next hotkey press cannot hit a dead engine.
-            lifecycle.stop()
-        }
-        // Pre-warm a fresh engine for the next session.
-        prepareEngine()
+        // Nothing is pre-warmed here: touching the HAL while idle can wedge
+        // AVFAudio in a busy loop against coreaudiod (see `startRecording`).
+        guard lifecycle.state != .idle else { return }
+        // A dictation was interrupted by sleep. Tell the owner, otherwise it
+        // still believes it is recording and the next hotkey press only
+        // "stops" a session that no longer exists.
+        lifecycle.stop()
+        onError?("Your Mac went to sleep during dictation, so recording stopped.")
     }
 
-    /// Stops and discards the cached engine. Safe to call from any state.
+    /// Stops and discards the engine. Safe to call from any state.
     private func recycleEngine() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard audioEngine != nil || hasInputTap else { return }
         enqueueEngineOp { [weak self] in
-            self?.runTeardownAttempt(keepEngineWarm: false)
+            self?.runTeardownAttempt()
         }
     }
 
@@ -202,8 +203,6 @@ public class AudioRecorder {
             if wasRecording {
                 self.lifecycle.stop()
                 self.onError?("The microphone changed during dictation, so recording stopped early.")
-            } else {
-                self.prepareEngine()
             }
         }
     }
@@ -230,55 +229,23 @@ public class AudioRecorder {
 
     // MARK: - Recording
 
-    /// Pre-create the audio engine so the first dictate press is not blocked by
-    /// CoreAudio init. The HAL queries behind `engine.inputNode` are
-    /// synchronous mach RPCs that can livelock with a misbehaving audio
-    /// device, so they run watchdogged on a private queue — never on the main
-    /// thread, where a wedged query would freeze the whole app.
-    public func prepareEngine() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self else { return }
-            self.enqueueEngineOp { self.runPrepareAttempt() }
-        }
-    }
-
-    /// Re-prewarms on the newly chosen microphone so the next dictation does
-    /// not pay for a cold engine. An active session keeps its device; the
-    /// start path rebinds on the next session anyway.
+    /// An active session keeps its device; the next session builds its engine
+    /// on the newly chosen microphone. Nothing is created while idle.
     public func selectedInputDidChange() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard lifecycle.state == .idle else { return }
         recycleEngine()
-        prepareEngine()
     }
 
-    private func runPrepareAttempt() {
-        dispatchPrecondition(condition: .onQueue(.main))
-        guard audioEngine == nil else {
-            finishEngineOp()
-            return
-        }
-        let selectedMicUID = SettingsStore.shared.selectedMicrophoneUID
-        runHALAttempt(label: "audio engine prewarm") { _ -> AVAudioEngine? in
-            let engine = AVAudioEngine()
-            do {
-                let inputNode = try TYPAudioSafety.inputNode(of: engine)
-                Self.bindSelectedDevice(selectedMicUID, engine: engine, inputNode: inputNode)
-                _ = inputNode.outputFormat(forBus: 0)
-            } catch {
-                Debug.log("Audio engine prewarm skipped: \(error.localizedDescription)")
-                return nil
-            }
-            return engine
-        } completion: { [weak self] engine in
-            guard let self, let engine else { return }
-            guard self.audioEngine == nil else { return }
-            self.audioEngine = engine
-            self.observeEngineConfiguration(engine)
-            Debug.log("Audio engine prewarmed")
-        } onTimeout: {}
-    }
-
+    /// Builds a fresh engine for every session and releases it afterwards.
+    ///
+    /// Typester used to pre-warm an engine at launch, on wake and on every
+    /// device change, and keep it between sessions. `engine.inputNode` can
+    /// livelock inside AVFAudio (`GetHWFormat` → `GetSubDevices`) against
+    /// coreaudiod; the watchdog abandons such an attempt but cannot stop the
+    /// spinning thread, so an idle Typester burned CPU in both processes until
+    /// it was quit. An idle engine also keeps receiving configuration changes.
+    /// Touching CoreAudio only while the user dictates rules both out.
     public func startRecording() {
         dispatchPrecondition(condition: .onQueue(.main))
         Debug.log("startRecording() called, state=\(lifecycle.state)")
@@ -307,17 +274,18 @@ public class AudioRecorder {
         guard wasActive else { return }
 
         Debug.log("Stopping audio engine...")
-        // Keep the engine warm — recreating AVAudioEngine is multi-second when Discord holds audio devices.
+        // Release the engine entirely: an idle engine is what used to keep
+        // CoreAudio (and the mic indicator) busy between dictations.
         enqueueEngineOp { [weak self] in
-            self?.runTeardownAttempt(keepEngineWarm: true)
+            self?.runTeardownAttempt()
         }
     }
 
     // MARK: - Start attempt
 
     private enum StartOutcome {
-        case started(engine: AVAudioEngine, inputNode: AVAudioInputNode, engineIsNew: Bool)
-        case failed(String, dropEngine: Bool)
+        case started(engine: AVAudioEngine, inputNode: AVAudioInputNode)
+        case failed(String)
     }
 
     private func setupAndStart() {
@@ -337,12 +305,10 @@ public class AudioRecorder {
             finishEngineOp()
             return
         }
-        let warmEngine = audioEngine
 
         runHALAttempt(label: "audio engine start") { [weak self] state -> StartOutcome? in
             guard let self else { return nil }
             return self.performEngineStart(
-                warmEngine: warmEngine,
                 selectedMicUID: selectedMicUID,
                 targetRate: targetRate,
                 state: state
@@ -362,7 +328,7 @@ public class AudioRecorder {
             self.lifecycle.failStarting()
             self.onError?("The microphone is not responding. An audio device is blocking CoreAudio — try again, or quit and reopen Typester if this persists.")
         } discardLate: { outcome in
-            guard case .started(let engine, let inputNode, _) = outcome else { return }
+            guard case .started(let engine, let inputNode) = outcome else { return }
             inputNode.removeTap(onBus: 0)
             engine.stop()
             engine.reset()
@@ -374,7 +340,6 @@ public class AudioRecorder {
     /// calls that can raise go through `TYPAudioSafety`, so a device race
     /// becomes an error message instead of terminating the app.
     private func performEngineStart(
-        warmEngine: AVAudioEngine?,
         selectedMicUID: String?,
         targetRate: Double,
         state: EngineAttemptState
@@ -384,28 +349,15 @@ public class AudioRecorder {
             Debug.log("Saved microphone is not connected — using the system default input")
         }
 
-        var engine = warmEngine ?? AVAudioEngine()
-        var engineIsNew = warmEngine == nil
-        if !engineIsNew,
-           let warmNode = try? TYPAudioSafety.inputNode(of: engine),
-           InputDeviceRouting.needsFreshEngine(
-               current: AudioInputDevices.currentDevice(of: warmNode),
-               selected: selectedDevice,
-               systemDefault: AudioInputDevices.defaultInputDeviceID()
-           ) {
-            Debug.log("Input device changed since prewarm — building a fresh engine")
-            engine = AVAudioEngine()
-            engineIsNew = true
-        }
-
+        let engine = AVAudioEngine()
         let inputNode: AVAudioInputNode
         do {
             inputNode = try TYPAudioSafety.inputNode(of: engine)
         } catch {
             Debug.log("Audio input unavailable: \(error.localizedDescription)")
-            return .failed("No microphone is available. Connect one or choose another in the Microphone menu.", dropEngine: true)
+            return .failed("No microphone is available. Connect one or choose another in the Microphone menu.")
         }
-        if engineIsNew, let selectedDevice {
+        if let selectedDevice {
             Self.bind(inputNode, of: engine, to: selectedDevice)
         }
 
@@ -420,7 +372,7 @@ public class AudioRecorder {
             Debug.log("Audio engine started successfully")
         } catch {
             Debug.log("Audio engine FAILED: \(error.localizedDescription)")
-            return .failed("Couldn't start the microphone: \(error.localizedDescription)", dropEngine: true)
+            return .failed("Couldn't start the microphone: \(error.localizedDescription)")
         }
         if state.wasAbandoned {
             engine.stop()
@@ -432,7 +384,7 @@ public class AudioRecorder {
         let clientFormat = inputNode.outputFormat(forBus: 0)
         guard let tapFormat = AudioTapFormat.make(hardware: hardwareFormat, client: clientFormat) else {
             engine.stop()
-            return .failed("The selected microphone has no usable audio format.", dropEngine: true)
+            return .failed("The selected microphone has no usable audio format.")
         }
         if hardwareFormat.sampleRate != clientFormat.sampleRate {
             Debug.log("Input format was stale (client \(clientFormat.sampleRate) Hz, hardware \(hardwareFormat.sampleRate) Hz) — tapping at the hardware rate")
@@ -446,7 +398,7 @@ public class AudioRecorder {
             interleaved: false
         ), let initialConverter = AVAudioConverter(from: tapFormat, to: targetFormat) else {
             engine.stop()
-            return .failed("Couldn't prepare audio conversion for this microphone.", dropEngine: true)
+            return .failed("Couldn't prepare audio conversion for this microphone.")
         }
 
         // Request ~60 Hz taps; CoreAudio may deliver larger buffers — always size convert from actual frames.
@@ -514,7 +466,7 @@ public class AudioRecorder {
         } catch {
             Debug.log("Installing the input tap FAILED: \(error.localizedDescription)")
             engine.stop()
-            return .failed("The microphone changed while starting. Please try again.", dropEngine: true)
+            return .failed("The microphone changed while starting. Please try again.")
         }
         if state.wasAbandoned {
             inputNode.removeTap(onBus: 0)
@@ -523,7 +475,7 @@ public class AudioRecorder {
             return nil
         }
 
-        return .started(engine: engine, inputNode: inputNode, engineIsNew: engineIsNew)
+        return .started(engine: engine, inputNode: inputNode)
     }
 
     /// Extracts mono Int16 PCM from a converter output buffer.
@@ -545,35 +497,21 @@ public class AudioRecorder {
     private func handleStartOutcome(_ outcome: StartOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
         switch outcome {
-        case .started(let engine, let inputNode, let engineIsNew):
+        case .started(let engine, let inputNode):
             audioEngine = engine
             tappedInputNode = inputNode
             hasInputTap = true
             lastLevelEmit = 0
-            if engineIsNew {
-                observeEngineConfiguration(engine)
-            }
+            observeEngineConfiguration(engine)
             lifecycle.finishStarting()
-        case .failed(let message, let dropEngine):
+        case .failed(let message):
+            // The failed engine was stopped on the worker and never stored,
+            // so it is released with the outcome; nothing is left to tear down.
             hasInputTap = false
             tappedInputNode = nil
             lifecycle.failStarting()
             onError?(message)
-            enqueueEngineOp { [weak self] in
-                self?.runTeardownAttempt(keepEngineWarm: !dropEngine)
-            }
         }
-    }
-
-    /// Binds a fresh engine to the saved microphone (system default when the
-    /// UID is nil or the device is gone).
-    private static func bindSelectedDevice(_ uid: String?, engine: AVAudioEngine, inputNode: AVAudioInputNode) {
-        guard let uid else { return }
-        guard let deviceID = AudioInputDevices.deviceID(forUID: uid) else {
-            Debug.log("Saved microphone is not connected — prewarming the system default input")
-            return
-        }
-        bind(inputNode, of: engine, to: deviceID)
     }
 
     /// Switching the device makes AVAudioEngine post a configuration change
@@ -600,49 +538,43 @@ public class AudioRecorder {
 
     // MARK: - Teardown attempt
 
-    private func runTeardownAttempt(keepEngineWarm: Bool) {
+    private func runTeardownAttempt() {
         dispatchPrecondition(condition: .onQueue(.main))
         let engine = audioEngine
         let inputNode = tappedInputNode
         let hadTap = hasInputTap
 
-        runHALAttempt(label: "audio engine teardown") { _ -> AVAudioEngine? in
+        runHALAttempt(label: "audio engine teardown") { _ -> Void? in
             if hadTap, let inputNode {
                 inputNode.removeTap(onBus: 0)
             }
             engine?.stop()
             engine?.reset()
-            return engine
-        } completion: { [weak self] tornDownEngine in
-            guard let self else { return }
-            self.finishTeardown(engine: tornDownEngine, keepEngineWarm: keepEngineWarm)
+            return ()
+        } completion: { [weak self] _ in
+            self?.releaseEngine()
+            Debug.log("Audio engine released")
         } onTimeout: { [weak self] in
-            guard let self else { return }
             // Wedged teardown: drop references so the next session builds fresh.
-            self.hasInputTap = false
-            self.tappedInputNode = nil
-            if !keepEngineWarm { self.audioEngine = nil }
+            self?.releaseEngine()
         }
     }
 
-    private func finishTeardown(engine: AVAudioEngine?, keepEngineWarm: Bool) {
+    /// Forgets the engine so no AVAudioEngine (and none of its HAL listeners)
+    /// outlives a dictation, and resets the meters to silence.
+    private func releaseEngine() {
         dispatchPrecondition(condition: .onQueue(.main))
         hasInputTap = false
         tappedInputNode = nil
         lastLevelEmit = 0
         spectrumAnalyzer.reset()
-        if keepEngineWarm {
-            onAudioLevel?(0)
-            onSpectrum?(Array(repeating: 0, count: spectrumAnalyzer.bandCount))
-            Debug.log("Audio engine stopped")
-            return
-        }
-        if let engineConfigObserver, engine != nil {
+        if let engineConfigObserver {
             NotificationCenter.default.removeObserver(engineConfigObserver)
             self.engineConfigObserver = nil
         }
         audioEngine = nil
-        Debug.log("Audio engine recycled")
+        onAudioLevel?(0)
+        onSpectrum?(Array(repeating: 0, count: spectrumAnalyzer.bandCount))
     }
 
     // MARK: - Analysis

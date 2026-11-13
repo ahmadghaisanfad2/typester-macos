@@ -116,6 +116,40 @@ public class SettingsStore: ObservableObject {
         }
     }
 
+    /// Custom Soniox real-time model name typed in Settings. Empty means "use
+    /// the built-in default", so a future default bump still reaches users who
+    /// never customized it.
+    @Published public var sonioxRealtimeModel: String = "" {
+        didSet { saveCustomModel(sonioxRealtimeModel, forKey: sonioxRealtimeModelKey) }
+    }
+
+    /// Custom Soniox async model name typed in Settings. Empty = default.
+    @Published public var sonioxAsyncModel: String = "" {
+        didSet { saveCustomModel(sonioxAsyncModel, forKey: sonioxAsyncModelKey) }
+    }
+
+    /// Model name sent to Soniox for `mode`: the trimmed custom name, or the
+    /// built-in default when the field is blank.
+    public func sonioxModelID(for mode: SonioxTranscribeMode) -> String {
+        let custom: String
+        switch mode {
+        case .realtime: custom = sonioxRealtimeModel
+        case .async: custom = sonioxAsyncModel
+        }
+        let trimmed = custom.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? mode.defaultModelID : trimmed
+    }
+
+    private func saveCustomModel(_ value: String, forKey key: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: key)
+        }
+        NotificationCenter.default.post(name: .settingsChanged, object: nil)
+    }
+
     /// Selected OpenRouter transcription model slug (e.g. `openai/whisper-large-v3`).
     @Published public var openrouterModelID: String = OpenRouterAPI.defaultModelID {
         didSet {
@@ -235,6 +269,8 @@ public class SettingsStore: ObservableObject {
     private let sttProviderKey = "sttProvider"
     private let openaiModelKey = "openaiModel"
     private let sonioxModeKey = "sonioxMode"
+    private let sonioxRealtimeModelKey = "sonioxRealtimeModel"
+    private let sonioxAsyncModelKey = "sonioxAsyncModel"
     private let openrouterModelIDKey = "openrouterModelID"
     private let xaiModeKey = "xaiMode"
     private let activationModeKey = "activationMode"
@@ -300,6 +336,7 @@ public class SettingsStore: ObservableObject {
         loadSTTProvider()
         loadOpenAIModel()
         loadSonioxMode()
+        loadSonioxCustomModels()
         loadOpenRouterModelID()
         loadXaiMode()
         loadFeedbackPreferences()
@@ -545,6 +582,16 @@ public class SettingsStore: ObservableObject {
             return
         }
         sonioxMode = mode
+    }
+
+    private func loadSonioxCustomModels() {
+        let defaults = UserDefaults.standard
+        if let realtime = defaults.string(forKey: sonioxRealtimeModelKey) {
+            sonioxRealtimeModel = realtime
+        }
+        if let async = defaults.string(forKey: sonioxAsyncModelKey) {
+            sonioxAsyncModel = async
+        }
     }
 
     private func loadOpenRouterModelID() {
