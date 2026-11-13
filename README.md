@@ -218,7 +218,7 @@ swift build --build-system native --product dictionary-smoke
 .build/debug/dictionary-smoke
 ```
 
-Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-14`).
+Full app UI build and `swift test` require Xcode (or GitHub Actions `macos-26`).
 ## Disclaimer
 
 This project is not affiliated with, endorsed by, or sponsored by Soniox, Deepgram, OpenAI, OpenRouter, or xAI. These are third-party services used for speech recognition.
